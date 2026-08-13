@@ -19,15 +19,18 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY web/ ./
-# Auth.js and Prisma both read env at module load. These are build-time placeholders only —
-# the real values arrive from the SealedSecret at runtime. A build must not need production
-# credentials.
-ENV AUTH_SECRET=build-time-placeholder-not-used-at-runtime \
-    AUTH_URL=http://localhost:3000 \
-    DATABASE_URL=postgres://placeholder:placeholder@localhost:5432/placeholder?schema=auth
 ARG APP_VERSION=dev
 ENV NEXT_PUBLIC_APP_VERSION=$APP_VERSION
-RUN npx prisma generate && npm run build
+# Auth.js and Prisma read env at module load, so a build needs *something* in these — but
+# nothing real. Scoped to this one RUN rather than set with ENV: image metadata should not
+# carry credential-shaped values at all, even placeholders (buildkit's
+# SecretsUsedInArgOrEnv check is right to flag that), and the runtime stage must inherit
+# nothing, so a missing SealedSecret makes the app fail loudly instead of starting with a
+# placeholder AUTH_SECRET.
+RUN AUTH_SECRET=build-only-never-used-at-runtime \
+    AUTH_URL=http://localhost:3000 \
+    DATABASE_URL='postgres://placeholder:placeholder@localhost:5432/placeholder?schema=auth' \
+    sh -c 'npx prisma generate && npm run build'
 
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
