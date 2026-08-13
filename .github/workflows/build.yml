@@ -1,0 +1,106 @@
+# Build both images and push them to ECR.
+#
+# No stored AWS keys: the job assumes AIES-Bettersentryio-ECRAccessRole via GitHub's OIDC
+# provider. That role's trust policy is pinned to this repository by its immutable subject
+# claim (repo:<org>@<orgId>/<repo>@<repoId>), so no other repo can assume it even inside the
+# same org.
+#
+# ArgoCD Image Updater watches ECR for tags matching ^v?[0-9]+\.[0-9]+\.[0-9]+, so a
+# semver tag is what actually triggers a deploy. Pushes to main publish `main-<sha>` and
+# `latest`, which are useful for pulling by hand but deliberately do NOT deploy.
+
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver tag to publish, e.g. v0.1.0 (deploys via Image Updater)"
+        required: false
+
+concurrency:
+  # One build per ref. A newer push makes an in-flight build irrelevant.
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: ap-southeast-5
+  REGISTRY: 865626945255.dkr.ecr.ap-southeast-5.amazonaws.com
+  ROLE_ARN: arn:aws:iam::865626945255:role/AIES-Bettersentryio-ECRAccessRole
+
+permissions:
+  contents: read
+  id-token: write # required to request the OIDC token
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      # Independent images: a failure in the UI build should not hide a good engine build.
+      fail-fast: false
+      matrix:
+        include:
+          - name: engine
+            repo: scicom/bettersentryio
+            dockerfile: Dockerfile
+          - name: web
+            repo: scicom/bettersentryio-web
+            dockerfile: Dockerfile.web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            version="${GITHUB_REF_NAME}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="main-${GITHUB_SHA::12}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Only semver tags are deployable; anything else is a build artefact.
+          case "$version" in
+            v[0-9]*.[0-9]*.[0-9]*) echo "deployable=true"  >> "$GITHUB_OUTPUT" ;;
+            *)                     echo "deployable=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-bettersentryio-${{ matrix.name }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          # The nodes are amd64; a runner-native arm64 image would not schedule.
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ matrix.repo }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ matrix.repo }}:latest
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            APP_VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Say what happens next
+        run: |
+          echo "pushed ${{ matrix.repo }}:${{ steps.version.outputs.version }}"
+          if [ "${{ steps.version.outputs.deployable }}" = "true" ]; then
+            echo "semver tag — ArgoCD Image Updater will roll this out"
+          else
+            echo "not a semver tag — published but will NOT deploy. Tag a release to deploy."
+          fi
