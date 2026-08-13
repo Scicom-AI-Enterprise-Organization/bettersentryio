@@ -87,6 +87,13 @@ jobs:
           # The nodes are amd64; a runner-native arm64 image would not schedule.
           platforms: linux/amd64
           push: true
+          # Without these, buildx pushes an OCI image index containing the amd64 image
+          # *plus* an attestation manifest whose platform is unknown/unknown. The
+          # containerd on EKS cannot resolve that and fails the pull with
+          # "no match for platform in manifest" — which looks like an auth or tag problem
+          # and is neither. A single-platform build wants a plain manifest.
+          provenance: false
+          sbom: false
           tags: |
             ${{ env.REGISTRY }}/${{ matrix.repo }}:${{ steps.version.outputs.version }}
             ${{ env.REGISTRY }}/${{ matrix.repo }}:latest
