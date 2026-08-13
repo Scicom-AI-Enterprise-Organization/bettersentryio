@@ -1,5 +1,8 @@
 generator client {
   provider = "prisma-client-js"
+  // The cluster runs arm64 nodes, and Prisma's query engine is a native binary. Without
+  // the arm64 target the image starts and then fails on the first query.
+  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-arm64-openssl-3.0.x"]
 }
 
 datasource db {

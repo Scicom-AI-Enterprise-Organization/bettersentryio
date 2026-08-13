@@ -84,8 +84,9 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          # The nodes are amd64; a runner-native arm64 image would not schedule.
-          platforms: linux/amd64
+          # The cluster is mixed and the dev-apps pool is arm64, so a single-arch image
+          # dies with 'exec format error' wherever Karpenter happens to place it.
+          platforms: linux/amd64,linux/arm64
           push: true
           # Without these, buildx pushes an OCI image index containing the amd64 image
           # *plus* an attestation manifest whose platform is unknown/unknown. The

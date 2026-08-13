@@ -1,6 +1,8 @@
 # The image is the binary. No shell, no package manager, no base OS to patch —
 # the only reason anything else is copied in is TLS trust for outbound webhooks.
-FROM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+# Set by buildx. Building natively and cross-compiling avoids QEMU entirely.
+ARG TARGETOS TARGETARCH
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -8,7 +10,7 @@ RUN go mod download
 COPY . .
 
 ARG VERSION=0.1.0-dev
-RUN CGO_ENABLED=0 go build -trimpath \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath \
         -ldflags "-s -w -X main.version=${VERSION}" \
         -o /out/bettersentryio ./cmd/bettersentryio
 
