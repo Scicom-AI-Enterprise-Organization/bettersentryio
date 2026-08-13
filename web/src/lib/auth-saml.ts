@@ -13,6 +13,9 @@ import { prisma } from "@/lib/db";
 export function getSamlClient() {
   return new SAML({
     entryPoint: process.env.AUTH_SAML_ENTRY_POINT!,
+    // Deliberately still the template default: an issuer is an identifier the IdP is
+    // registered against, so renaming it silently breaks an existing registration.
+    // Set AUTH_SAML_ISSUER when SAML is actually configured.
     issuer: process.env.AUTH_SAML_ISSUER ?? "enterprise-template",
     callbackUrl: `${process.env.AUTH_URL}/api/auth/saml/callback`,
     idpCert: process.env.AUTH_SAML_IDP_CERT!,

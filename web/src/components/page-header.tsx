@@ -21,7 +21,7 @@ interface PageHeaderProps {
 }
 
 export function PageHeader({
-  brand = "Enterprise Template",
+  brand = "bettersentryio",
   links = [],
   actions,
 }: PageHeaderProps) {

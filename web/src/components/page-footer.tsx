@@ -8,7 +8,7 @@ interface PageFooterProps {
 }
 
 export function PageFooter({
-  brand = "Enterprise Template",
+  brand = "bettersentryio",
   description = "Built with Next.js, Tailwind CSS, and Radix UI.",
 }: PageFooterProps) {
   return (

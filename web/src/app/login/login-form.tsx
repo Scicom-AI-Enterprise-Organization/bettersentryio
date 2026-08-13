@@ -110,16 +110,17 @@ export function LoginForm({ callbackUrl, error, providers }: LoginFormProps) {
               className="h-9 w-auto select-none"
             />
             <span className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-              Enterprise Template
+              bettersentryio
             </span>
           </Link>
           <div className="max-w-md space-y-3">
             <h2 className="text-3xl font-semibold tracking-tight text-foreground">
-              Everything your enterprise apps need, built in.
+              A green health check is not proof your service is working.
             </h2>
             <p className="text-sm text-muted-foreground">
-              Role-based access control, single sign-on, and audit-ready user
-              management — ready out of the box.
+              bettersentryio watches background loops from the inside: heartbeats catch a
+              loop that stopped, and a progress counter catches one that is still beating
+              while doing nothing at all.
             </p>
           </div>
         </div>
@@ -138,7 +139,7 @@ export function LoginForm({ callbackUrl, error, providers }: LoginFormProps) {
               className="h-8 w-auto select-none"
             />
             <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Enterprise Template
+              bettersentryio
             </span>
           </Link>
 
@@ -146,7 +147,7 @@ export function LoginForm({ callbackUrl, error, providers }: LoginFormProps) {
             <div className="space-y-1">
               <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
               <p className="text-sm text-muted-foreground">
-                Welcome back to Enterprise Template.
+                Sign in to bettersentryio.
               </p>
             </div>
 
