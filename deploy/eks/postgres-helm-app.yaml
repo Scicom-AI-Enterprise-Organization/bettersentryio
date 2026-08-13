@@ -1,0 +1,66 @@
+# Postgres in-cluster via Helm, as asked — no RDS.
+#
+# ArgoCD Application with a Helm source, since the app itself is Kustomize and the two do
+# not compose in one source. Goes in infra-dev/app-of-apps/templates/.
+#
+# NOTE, worth a decision before applying: `infra-foundation` already runs **CNPG**
+# (`cnpg-operator` + `clusterpg`, 8 databases), and that is the house pattern — docmost was
+# migrated *off* in-app Postgres onto it. Two reasons to prefer it here too:
+#   * Bitnami restructured their catalogue in 2025; the freely-pullable images moved to
+#     `bitnamilegacy` and the maintained ones need a subscription. A chart that pulls
+#     `bitnami/postgresql` may simply stop resolving.
+#   * CNPG gives backups, PITR and failover that this chart does not.
+# `postgres-cnpg.yaml` next to this file is the same database as a CNPG Cluster. Use one.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bettersentryio-postgres
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  destination:
+    namespace: bettersentryio
+    server: https://kubernetes.default.svc
+  project: infra-dev
+  source:
+    repoURL: registry-1.docker.io/bitnamilegacy
+    chart: postgresql
+    targetRevision: 16.7.27
+    helm:
+      releaseName: bettersentryio-postgresql
+      valuesObject:
+        auth:
+          username: bettersentryio
+          database: bettersentryio
+          # Same value the app reads, from the SealedSecret in this app's namespace.
+          existingSecret: bettersentryio-secrets
+          secretKeys:
+            adminPasswordKey: POSTGRES_PASSWORD
+            userPasswordKey: POSTGRES_PASSWORD
+        primary:
+          persistence:
+            enabled: true
+            size: 20Gi
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          # The engine holds a small pool and the detector sweeps every 10s; the default
+          # 100 connections is ample and worth not raising, since each costs memory.
+          extendedConfiguration: |
+            max_connections = 100
+            shared_buffers = 256MB
+        # One replica: the engine degrades rather than crashes when Postgres is away
+        # (ARCHITECTURE §10), and a standby is not what makes this reliable.
+        architecture: standalone
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - SetDeletionFinalizer=true

@@ -2,7 +2,7 @@ BIN     := bin/bettersentryio
 DEV_DB  ?= postgres://localhost/bettersentryio_dev?sslmode=disable
 TEST_DB ?= postgres://localhost/bettersentryio_test?sslmode=disable
 
-.PHONY: help build run test demo fmt vet check db clean
+.PHONY: dev-up dev-down dev-status help build run test demo fmt vet check db clean
 
 help:
 	@echo "make build   - build the binary (static, no CGO)"
@@ -35,6 +35,15 @@ vet:
 	go vet ./...
 
 check: fmt vet test
+
+dev-up:  ## start postgres, engine and UI on the host (no Docker)
+	@./scripts/dev.sh up
+
+dev-down:  ## stop the engine and the UI
+	@./scripts/dev.sh down
+
+dev-status:  ## what is listening and is it healthy
+	@./scripts/dev.sh status
 
 db:
 	-createdb bettersentryio_dev

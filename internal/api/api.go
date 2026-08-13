@@ -15,6 +15,7 @@ import (
 
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/clients"
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/alert"
+	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/events"
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/monitor"
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/store"
 )
@@ -27,6 +28,7 @@ type SessionChecker interface {
 
 type Server struct {
 	db       *store.DB
+	events   *events.Store
 	apiToken string
 	engine   *monitor.Engine
 	detector *monitor.Detector
@@ -42,7 +44,7 @@ type Server struct {
 // development convenience the caller is expected to warn about loudly.
 func New(db *store.DB, e *monitor.Engine, d *monitor.Detector, a *alert.Alerter, log *slog.Logger, version, apiToken string, session SessionChecker) *Server {
 	return &Server{
-		db: db, engine: e, detector: d, alerter: a, log: log,
+		db: db, events: events.New(db), engine: e, detector: d, alerter: a, log: log,
 		version: version, apiToken: apiToken, started: time.Now(), session: session,
 	}
 }
@@ -117,6 +119,12 @@ func (s *Server) Handler(ui interface{ Routes(*http.ServeMux) }) http.Handler {
 	mux.HandleFunc("POST /api/0/apps", s.handleCreateApp)
 	mux.HandleFunc("GET /api/0/apps/{slug}", s.handleAppDetail)
 	mux.HandleFunc("DELETE /api/0/apps/{slug}", s.handleDeleteApp)
+	// Error tracking (internal/api/errors.go). Ingest takes an ingest key like a beat;
+	// reading takes a session or a key; resolving takes the operator token.
+	mux.HandleFunc("POST /api/0/errors", s.handleIngestError)
+	mux.HandleFunc("GET /api/0/issues", s.handleIssues)
+	mux.HandleFunc("GET /api/0/issues/{id}", s.handleIssueDetail)
+	mux.HandleFunc("POST /api/0/issues/{id}/resolve", s.handleResolveIssue)
 	// The SDK sources, so a service can curl the client off the engine it reports to.
 	clients.Routes(mux)
 	// Health and readiness stay unauthenticated: a probe should not need a session,

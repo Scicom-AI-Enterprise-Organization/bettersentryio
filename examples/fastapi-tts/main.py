@@ -29,13 +29,18 @@ import os
 import random
 import time
 from contextlib import asynccontextmanager
+from typing import Dict
 
 from fastapi import FastAPI, HTTPException
 
-from bettersentryio import Beat
+from bettersentryio import Beat, BsioMiddleware, init
 
 MONITOR = os.environ.get("BSIO_MONITOR", "tts-batcher")
 EVERY = int(os.environ.get("BSIO_EVERY", "10"))
+
+# Error capture: installs the exception hooks (sys, threading, asyncio, logging) so
+# nothing here needs a try/except to be reported.
+init()
 
 bsio = Beat(
     base_url=os.environ.get("BSIO_URL", "http://localhost:9090"),
@@ -55,7 +60,8 @@ class State:
         self.last_batch_at: float | None = None
 
         # Failure injection, for the stress scenarios.
-        self.error_rate = 0.0     # fraction of /synthesize calls that raise
+        self.error_rate = 0.0     # fraction of /synthesize calls returning HTTPException
+        self.crash_rate = 0.0     # fraction that raise a genuine unhandled exception
         self.raise_in_loop = False  # next iteration raises, killing the task
         self.block_ms = 0         # sync CPU burn per request: starves the event loop
         self.requests = 0
@@ -120,6 +126,9 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Dummy TTS API", lifespan=lifespan)
+# Reports unhandled exceptions on the request path, then re-raises so FastAPI still
+# returns its own 500. Without this, request errors are invisible — measured, PLAN §7a.
+app.add_middleware(BsioMiddleware)
 
 
 @app.get("/health")
@@ -165,8 +174,18 @@ async def synthesize(text: str = "hello"):
         while time.perf_counter() < deadline:
             pass
 
+    if state.crash_rate and random.random() < state.crash_rate:
+        state.failures += 1
+        # A real bug, not a chosen status: nothing catches this, so the middleware sees
+        # it and FastAPI turns it into a 500. HTTPException below is the opposite case.
+        voices: Dict[str, int] = {}
+        return {"voice": voices["default"]}
+
     if state.error_rate and random.random() < state.error_rate:
         state.failures += 1
+        # Deliberate: HTTPException is how you *choose* to return an error, so Starlette
+        # handles it and no exception reaches the middleware. Correctly not reported as a
+        # crash — a 500 you asked for is not a bug.
         raise HTTPException(status_code=500, detail="TTS backend refused the request")
 
     produced = await synthesize_batch()
@@ -178,6 +197,16 @@ def break_errors(rate: float = 0.5):
     """Fail a fraction of requests. The loop is untouched."""
     state.error_rate = max(0.0, min(1.0, rate))
     return {"error_rate": state.error_rate, "expect": "bettersentryio sees nothing — the loop is fine"}
+
+
+@app.post("/break/crash")
+def break_crash(rate: float = 0.5):
+    """Fail a fraction of requests with a genuine unhandled exception."""
+    state.crash_rate = max(0.0, min(1.0, rate))
+    return {
+        "crash_rate": state.crash_rate,
+        "expect": "captured as an issue — unhandled, unlike HTTPException",
+    }
 
 
 @app.post("/break/block")
@@ -217,6 +246,7 @@ async def fix():
     """Clear every injected failure and restart the loop if it died."""
     state.frozen = False
     state.error_rate = 0.0
+    state.crash_rate = 0.0
     state.block_ms = 0
     state.raise_in_loop = False
     task = getattr(app.state, "loop_task", None)

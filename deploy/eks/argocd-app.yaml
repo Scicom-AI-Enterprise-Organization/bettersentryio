@@ -1,0 +1,25 @@
+# Goes in infra-dev/app-of-apps/templates/bettersentryio.yaml
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bettersentryio
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  destination:
+    namespace: bettersentryio
+    server: https://kubernetes.default.svc
+  project: infra-dev
+  source:
+    path: apps/bettersentryio
+    repoURL: https://github.com/AIES-Infra/infra-dev
+    targetRevision: HEAD
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - SetDeletionFinalizer=true

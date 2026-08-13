@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: bettersentryio
+resources:
+  - deployment.yaml
+  - ingress.yaml
+  - secrets/bettersentryio.sealed.yaml
+  - imageupdater.yaml
+images:
+  - name: 865626945255.dkr.ecr.ap-southeast-5.amazonaws.com/scicom/bettersentryio
+    newTag: latest
+  - name: 865626945255.dkr.ecr.ap-southeast-5.amazonaws.com/scicom/bettersentryio-web
+    newTag: latest

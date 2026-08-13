@@ -1,0 +1,78 @@
+# Two hostnames, because the two surfaces have different audiences.
+#
+# The console is for people; the ingest host is for services. Splitting them means the
+# read and admin API (/api/0/overview, /issues, /apps) is never exposed publicly at all —
+# the UI reaches those in-cluster over the Service. Only ingest and the SDK download are
+# on the public path.
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bettersentryio
+  namespace: bettersentryio
+  annotations:
+    cert-manager.io/cluster-issuer: aies-scicom-dev
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - bettersentryio.aies.scicom.dev
+      secretName: bettersentryio-tls
+  rules:
+    - host: bettersentryio.aies.scicom.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bettersentryio-web
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bettersentryio-ingest
+  namespace: bettersentryio
+  annotations:
+    cert-manager.io/cluster-issuer: aies-scicom-dev
+    # Beats are tiny and constant. A monitored service must never be slowed by us, and a
+    # burst of crash reports from one bad deploy must not be throttled into silence.
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "3"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "10"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - bsio-ingest.aies.scicom.dev
+      secretName: bettersentryio-ingest-tls
+  rules:
+    - host: bsio-ingest.aies.scicom.dev
+      http:
+        paths:
+          # Heartbeats.
+          - path: /api/0/beat
+            pathType: Prefix
+            backend:
+              service:
+                name: bettersentryio-engine
+                port:
+                  number: 9090
+          # Error events (M2).
+          - path: /api/0/errors
+            pathType: Prefix
+            backend:
+              service:
+                name: bettersentryio-engine
+                port:
+                  number: 9090
+          # The SDK itself, so a service can curl the client off the engine it reports to.
+          - path: /clients
+            pathType: Prefix
+            backend:
+              service:
+                name: bettersentryio-engine
+                port:
+                  number: 9090

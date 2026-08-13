@@ -15,7 +15,8 @@ covers more than it does is worse than one whose gaps you know.
 Scenarios map onto the failure-injection endpoints of examples/fastapi-tts:
 
   baseline  healthy load, nothing injected
-  errors    a fraction of requests raise; the loop is untouched
+  errors    a fraction of requests return HTTPException(500) — deliberate, so not a crash
+  crash     a fraction raise a genuine unhandled exception — captured as an issue
   block     each request burns CPU synchronously, starving the event loop
   raise     the loop raises and its task dies; the server keeps serving
 
@@ -51,6 +52,17 @@ def post(url: str, timeout: float = 10.0) -> tuple[int, float]:
         return e.code, time.perf_counter() - started
     except Exception:
         return 0, time.perf_counter() - started
+
+
+def issue_count(base: str, key: str, project: str) -> int:
+    """Unresolved issues, so the verdict can tell 'not detected' from 'detected as an error'."""
+    url = f"{base.rstrip('/')}/api/0/issues?project={urllib.parse.quote(project)}"
+    req = urllib.request.Request(url, headers={"X-BSIO-Key": key})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return int(json.load(r)["counts"]["events"])
+    except Exception:
+        return -1
 
 
 def engine_state(base: str, key: str, monitor: str) -> dict:
@@ -114,11 +126,13 @@ def main() -> int:
     ap.add_argument("--engine", default=os.environ.get("BSIO_URL", "http://localhost:9090"))
     ap.add_argument("--key", default=os.environ.get("BSIO_KEY", ""))
     ap.add_argument("--monitor", default=os.environ.get("BSIO_MONITOR", "tts-batcher"))
+    ap.add_argument("--project", default=os.environ.get("BSIO_PROJECT", "default"))
     ap.add_argument("--scenario", default="baseline",
-                    choices=["baseline", "errors", "block", "raise"])
+                    choices=["baseline", "errors", "crash", "block", "raise"])
     ap.add_argument("--seconds", type=int, default=60)
     ap.add_argument("--concurrency", type=int, default=24)
     ap.add_argument("--error-rate", type=float, default=0.5)
+    ap.add_argument("--crash-rate", type=float, default=0.5)
     ap.add_argument("--block-ms", type=int, default=250)
     args = ap.parse_args()
 
@@ -134,12 +148,17 @@ def main() -> int:
     if args.scenario == "errors":
         post(f"{target}/break/errors?rate={args.error_rate}")
         injected = f"{args.error_rate:.0%} of requests raise 500"
+    elif args.scenario == "crash":
+        post(f"{target}/break/crash?rate={args.crash_rate}")
+        injected = f"{args.crash_rate:.0%} of requests raise an unhandled exception"
     elif args.scenario == "block":
         post(f"{target}/break/block?ms={args.block_ms}")
         injected = f"{args.block_ms}ms sync CPU per request"
     elif args.scenario == "raise":
         post(f"{target}/break/raise")
         injected = "the loop raises and its task dies"
+
+    events_before = issue_count(args.engine, args.key, args.project)
 
     print(f"scenario : {args.scenario} — {injected}")
     print(f"load     : {args.concurrency} concurrent POST {target}/synthesize for {args.seconds}s")
@@ -192,15 +211,24 @@ def main() -> int:
 
     statuses = {r["status"] for r in timeline}
     total_5xx = sum(r["5xx"] for r in timeline)
+    events_after = issue_count(args.engine, args.key, args.project)
+    new_events = events_after - events_before if events_before >= 0 <= events_after else -1
+
     print()
     print(f"served    : ~{sum(r['rps'] for r in timeline) * 5:.0f} requests, {total_5xx} of them 5xx")
-    print(f"bsio saw  : {', '.join(sorted(statuses))}")
+    print(f"monitors  : {', '.join(sorted(statuses))}")
+    print(f"issues    : {new_events if new_events >= 0 else '?'} new error events captured")
+
     healthy_throughout = statuses <= {"ok"}
-    if total_5xx and healthy_throughout:
-        print("verdict   : NOT DETECTED — the loop kept working, so the monitor stayed green.")
-        print("            Request-path errors need error ingest (M2); heartbeats cannot see them.")
-    elif not healthy_throughout:
-        print("verdict   : DETECTED — the failure reached the loop and the monitor changed state.")
+    if not healthy_throughout:
+        print("verdict   : DETECTED by the monitor — the failure reached the loop.")
+    elif new_events > 0:
+        print("verdict   : DETECTED as errors — the loop was fine, the code raised, and the")
+        print("            exception hooks reported it with a stacktrace.")
+    elif total_5xx:
+        print("verdict   : NOT DETECTED. The loop kept working and nothing raised, so neither")
+        print("            half saw it. HTTPException is the usual reason: a status you chose")
+        print("            to return is not a crash, and is deliberately not reported.")
     else:
         print("verdict   : healthy throughout, nothing to detect.")
 

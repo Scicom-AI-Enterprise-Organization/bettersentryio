@@ -12,3 +12,5 @@ web/tsconfig.tsbuildinfo
 # Example service scratch: venv and the SDK copy fetched from a running engine.
 examples/*/.venv/
 examples/*/bettersentryio.py
+__pycache__/
+*.pyc

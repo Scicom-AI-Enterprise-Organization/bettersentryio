@@ -1,0 +1,200 @@
+# bettersentryio on aies-eks.
+#
+# Two Deployments, because it is two processes (PLAN D11a): the Go engine owns ingest,
+# detection and alerting; the Next.js UI is only its operator console. They fail
+# independently on purpose — the UI can be down while monitoring continues.
+#
+# Conventions taken from infra-dev/apps/enterprise-template: nginx ingress class,
+# cert-manager cluster-issuer, ClusterIP services, reloader annotation, backstage label.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bettersentryio-engine
+  namespace: bettersentryio
+  annotations:
+    reloader.stakater.com/auto: "true"
+  labels:
+    app: bettersentryio-engine
+    backstage.io/kubernetes-id: bettersentryio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bettersentryio-engine
+  template:
+    metadata:
+      labels:
+        app: bettersentryio-engine
+        backstage.io/kubernetes-id: bettersentryio
+    spec:
+      containers:
+        - name: engine
+          image: 865626945255.dkr.ecr.ap-southeast-5.amazonaws.com/scicom/bettersentryio:latest
+          imagePullPolicy: Always
+          args: ["serve", "--tick-interval", "10s"]
+          ports:
+            - name: http
+              containerPort: 9090
+          env:
+            - name: BSIO_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: bettersentryio-secrets
+                  key: BSIO_DATABASE_URL
+            - name: BSIO_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: bettersentryio-secrets
+                  key: BSIO_API_TOKEN
+            - name: BSIO_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: bettersentryio-secrets
+                  key: BSIO_ADMIN_PASSWORD
+            - name: BSIO_BASE_URL
+              value: https://bettersentryio.aies.scicom.dev
+          # /-/ready is a database ping; /-/health additionally reports our own loop ages
+          # and returns 503 when a detector sweep is failing. Using it as the liveness
+          # probe is deliberate: a monitoring tool whose detector is wedged should be
+          # restarted, not left answering 200 — that is the failure this project exists
+          # to catch, and it would be embarrassing to ship it in ourselves.
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /-/health
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            # Tolerant on purpose: a transient Postgres blip degrades /-/health, and
+            # restarting the pod would not fix that.
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bettersentryio-engine
+  namespace: bettersentryio
+spec:
+  selector:
+    app: bettersentryio-engine
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bettersentryio-web
+  namespace: bettersentryio
+  annotations:
+    reloader.stakater.com/auto: "true"
+  labels:
+    app: bettersentryio-web
+    backstage.io/kubernetes-id: bettersentryio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bettersentryio-web
+  template:
+    metadata:
+      labels:
+        app: bettersentryio-web
+        backstage.io/kubernetes-id: bettersentryio
+    spec:
+      containers:
+        - name: web
+          image: 865626945255.dkr.ecr.ap-southeast-5.amazonaws.com/scicom/bettersentryio-web:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            # In-cluster, so the operator token never traverses the ingress.
+            - name: BSIO_API_URL
+              value: http://bettersentryio-engine.bettersentryio.svc.cluster.local:9090
+            # What the generated SDK snippets tell services to call. Public, because the
+            # services being monitored may run outside this cluster.
+            - name: BSIO_PUBLIC_URL
+              value: https://bsio-ingest.aies.scicom.dev
+            - name: AUTH_URL
+              value: https://bettersentryio.aies.scicom.dev
+            - name: NEXT_PUBLIC_APP_VERSION
+              value: "0.1.0"
+            - name: BSIO_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: bettersentryio-secrets
+                  key: BSIO_API_TOKEN
+            - name: AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: bettersentryio-secrets
+                  key: AUTH_SECRET
+            # Prisma owns the `auth` schema only. Never point it at `public` — `db push`
+            # offers to drop every Go-owned table.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: bettersentryio-secrets
+                  key: DATABASE_URL
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /login
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 768Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bettersentryio-web
+  namespace: bettersentryio
+spec:
+  selector:
+    app: bettersentryio-web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+  type: ClusterIP
