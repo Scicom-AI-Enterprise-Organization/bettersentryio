@@ -1,0 +1,70 @@
+{{define "content"}}
+<div class="tiles">
+  <div class="tile{{if .Summary.Unhealthy}} bad{{end}}">
+    <span class="k">Need attention</span>
+    <span class="v">{{.Summary.Unhealthy}}</span>
+    <span class="sub">{{.Summary.Missing}} missing · {{.Summary.Stalled}} stalled</span>
+  </div>
+  <div class="tile good">
+    <span class="k">Healthy</span>
+    <span class="v">{{.Summary.OK}}</span>
+    <span class="sub">{{.Summary.Late}} late · {{.Summary.Waiting}} waiting</span>
+  </div>
+  <div class="tile">
+    <span class="k">Monitors</span>
+    <span class="v">{{.Summary.Total}}</span>
+    <span class="sub">created by their first beat</span>
+  </div>
+  <div class="tile{{if .Summary.OpenIncidents}} warn{{end}}">
+    <span class="k">Open incidents</span>
+    <span class="v">{{.Summary.OpenIncidents}}</span>
+    <span class="sub"><a href="/incidents">incident log →</a></span>
+  </div>
+</div>
+
+<h2>Monitors</h2>
+
+{{with .Data}}
+{{if not .Monitors}}
+<div class="empty">
+  <p><b>No monitors yet.</b> A monitor is created by its first heartbeat — there is nothing to set up first.</p>
+  <pre>curl "$BASE/api/0/beat/my-loop?key=$INGEST_KEY&amp;every=30&amp;progress=1"</pre>
+  <p class="sub">Find the ingest key under <a href="/settings">Settings</a>.</p>
+</div>
+{{else}}
+<div class="tablewrap">
+<table class="monitors">
+<thead>
+<tr>
+  <th>Monitor</th><th>Status</th><th>Last beat</th><th>Progress</th>
+  <th>Activity <span class="th-sub">1h</span></th><th class="num">Uptime <span class="th-sub">24h</span></th><th class="num">Beats <span class="th-sub">24h</span></th>
+</tr>
+</thead>
+<tbody>
+{{range .Monitors}}
+<tr class="{{if or (eq .Status "missing") (eq .Status "stalled")}}row-bad{{end}}">
+  <td>
+    <a class="slug" href="/monitors/{{.Slug}}">{{.Slug}}</a>
+    <span class="meta">{{.Environment}} · every {{secs .EverySecs}}{{if .Muted}} · <span class="muted-tag">muted</span>{{end}}</span>
+  </td>
+  <td><span class="pill {{.Status}}">{{.Status}}</span>
+      {{if .OpenSince}}<span class="meta">for {{since .OpenSince}}</span>{{end}}</td>
+  <td class="num">{{clock .LastBeatAt}}<span class="meta">{{ago .LastBeatAt}}</span></td>
+  <td class="num">{{progress .LastProgress}}</td>
+  <td>
+    <div class="spark" title="beats per 5 minutes, last hour">
+      {{range .Spark}}<i style="height:{{barHeight .Beats $.Data.MaxBeats}}%" title="{{clock .WindowStart}} — {{.Beats}} beats"></i>{{end}}
+      {{if not .Spark}}<span class="meta">no beats in the last hour</span>{{end}}
+    </div>
+  </td>
+  <td class="num" title="measured over {{dur .Observed24h}} of history">{{pct .Uptime24h}}
+    {{if lt .Observed24h 3600000000000}}<span class="meta">of {{dur .Observed24h}}</span>{{end}}</td>
+  <td class="num dim">{{.Beats24h}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{end}}
+{{end}}
+{{end}}

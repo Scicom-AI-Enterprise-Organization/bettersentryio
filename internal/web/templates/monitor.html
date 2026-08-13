@@ -1,0 +1,84 @@
+{{define "content"}}
+{{with .Data}}
+<p class="crumb"><a href="/">Monitors</a> / {{.Row.Slug}}</p>
+
+<div class="detailhead">
+  <div>
+    <h1>{{.Row.Slug}}</h1>
+    <p class="sub">{{.Row.Environment}} · {{.Row.Kind}} monitor · created {{since .Row.CreatedAt}} ago</p>
+  </div>
+  <div class="detailstatus">
+    <span class="pill big {{.Row.Status}}">{{.Row.Status}}</span>
+    {{if .Row.OpenSince}}<span class="meta">since {{stamp .Row.OpenSince}} ({{since .Row.OpenSince}})</span>{{end}}
+  </div>
+  <form method="post" action="/monitors/{{.Row.Slug}}/{{if .Row.Muted}}unmute{{else}}mute{{end}}">
+    <button class="btn">{{if .Row.Muted}}Unmute{{else}}Mute alerts{{end}}</button>
+  </form>
+</div>
+
+{{if eq .Row.Status "stalled"}}
+<div class="callout warn">
+  <b>Beating, but making no progress.</b> Heartbeats are arriving on schedule while the progress
+  counter sits at {{progress .Row.LastProgress}} — the loop is alive and doing nothing. A liveness
+  check alone would call this healthy.
+</div>
+{{else if eq .Row.Status "missing"}}
+<div class="callout bad">
+  <b>No heartbeat.</b> Expected one every {{secs .Row.EverySecs}} with {{secs .Row.GraceSecs}} of
+  grace; nothing since {{stamp .Row.LastBeatAt}}. If the service still answers its own health check,
+  this is precisely the failure that check cannot see.
+</div>
+{{end}}
+
+<div class="facts">
+  <div><span class="k">Last beat</span><span class="v">{{clock .Row.LastBeatAt}}</span><span class="meta">{{ago .Row.LastBeatAt}}</span></div>
+  <div><span class="k">Next expected</span><span class="v">{{clock .Row.NextExpectedAt}}</span><span class="meta">every {{secs .Row.EverySecs}}</span></div>
+  <div><span class="k">Grace</span><span class="v">{{secs .Row.GraceSecs}}</span><span class="meta">before missing</span></div>
+  <div><span class="k">Stall window</span><span class="v">{{if gt .Row.StallSecs 0}}{{secs .Row.StallSecs}}{{else}}off{{end}}</span><span class="meta">frozen progress</span></div>
+  <div><span class="k">Progress</span><span class="v">{{progress .Row.LastProgress}}</span><span class="meta">monotonic counter</span></div>
+  <div><span class="k">Uptime</span><span class="v">{{pct .Row.Uptime24h}}</span><span class="meta">over {{dur .Row.Observed24h}} · {{.Row.Beats24h}} beats</span></div>
+</div>
+
+<h2>Beat activity <span class="h2sub">last 2 hours, 5-minute buckets</span></h2>
+{{if .Activity}}
+<div class="chart">
+  {{range .Activity}}
+  <div class="col" title="{{clock .WindowStart}} — {{.Beats}} beats, progress +{{.ProgressDelta}}">
+    <i style="height:{{barHeight .Beats $.Data.MaxBeats}}%"></i>
+  </div>
+  {{end}}
+</div>
+<p class="meta">peak {{.MaxBeats}} beats in a bucket</p>
+{{else}}
+<p class="empty-inline">No beats recorded in the last two hours.</p>
+{{end}}
+
+<h2>Incidents</h2>
+{{if .Incidents}}
+<div class="tablewrap">
+<table>
+<thead><tr><th>Kind</th><th>Opened</th><th>Resolved</th><th class="num">Duration</th><th class="num">Alerts sent</th></tr></thead>
+<tbody>
+{{range .Incidents}}
+<tr>
+  <td><span class="pill {{if eq .Kind "stalled"}}stalled{{else}}missing{{end}}">{{.Kind}}</span></td>
+  <td class="num">{{stamp .OpenedAt}}</td>
+  <td class="num">{{if .Open}}<span class="pill missing">ongoing</span>{{else}}{{stamp .ResolvedAt}}{{end}}</td>
+  <td class="num">{{dur .Duration}}</td>
+  <td class="num {{if eq .Delivered 0}}dim{{end}}">{{.Delivered}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{else}}
+<p class="empty-inline">No incidents recorded. This monitor has never gone missing or stalled.</p>
+{{end}}
+
+<h2>Configuration</h2>
+<table class="kv">
+{{range $k, $v := .Config}}<tr><td>{{$k}}</td><td class="num">{{json $v}}</td></tr>{{end}}
+</table>
+<p class="meta">Set by the beat's query parameters — the loop itself declares how often it runs.</p>
+{{end}}
+{{end}}

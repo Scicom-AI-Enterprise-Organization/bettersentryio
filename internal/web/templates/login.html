@@ -1,0 +1,32 @@
+{{define "login"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · bettersentryio</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%233ecfa8'/></svg>">
+</head>
+<body class="centered">
+<form class="signin" method="post" action="/login">
+  <div class="brand big"><span class="pulse"></span>bettersentryio</div>
+  <p class="sub">Error tracking and background-loop liveness.</p>
+
+  {{if .Flash}}<p class="error">{{.Flash}}</p>{{end}}
+
+  <label>Username
+    <input name="username" autocomplete="username" autofocus required value="admin">
+  </label>
+  <label>Password
+    <input name="password" type="password" autocomplete="current-password" required>
+  </label>
+  <input type="hidden" name="next" value="{{.NextPath}}">
+  <button type="submit">Sign in</button>
+
+  {{if .Warn}}
+  <p class="hint">Development default: <code>admin</code> / <code>12345</code> — change it before
+  this instance is reachable by anyone else.</p>
+  {{end}}
+</form>
+</body>
+</html>{{end}}

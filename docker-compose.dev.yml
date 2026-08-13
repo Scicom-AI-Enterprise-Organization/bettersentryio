@@ -1,0 +1,50 @@
+# Development stack. Two ways to use it:
+#
+#   Postgres only (run the app with `make run` against it):
+#     docker compose -f docker-compose.dev.yml up -d
+#     export BSIO_DATABASE_URL='postgres://bettersentryio:bettersentryio@localhost:5433/bettersentryio?sslmode=disable'
+#
+#   Everything, app included — the whole product in one command:
+#     docker compose -f docker-compose.dev.yml --profile app up --build
+#     open http://localhost:9090/
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bettersentryio
+      POSTGRES_PASSWORD: bettersentryio
+      POSTGRES_DB: bettersentryio
+    ports:
+      # 5433 so it cannot collide with a Postgres already on the host.
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bettersentryio"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - bsio_pgdata:/var/lib/postgresql/data
+
+  # Opt-in so the default `up -d` stays Postgres-only for `make run` workflows.
+  bettersentryio:
+    profiles: ["app"]
+    build:
+      context: .
+      args:
+        VERSION: 0.1.0-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Service DNS, not localhost — inside the network Postgres is on 5432.
+      BSIO_DATABASE_URL: postgres://bettersentryio:bettersentryio@postgres:5432/bettersentryio?sslmode=disable
+      BSIO_BASE_URL: http://localhost:9090
+      # Operator token for the admin API. The UI presents this; ingest keys cannot
+      # create or delete apps. Dev value only — real deployments use a secret file.
+      BSIO_API_TOKEN: "${BSIO_API_TOKEN:?set it in .env — openssl rand -hex 24}"
+    command: ["serve", "--tick-interval", "5s"]
+    ports:
+      - "9090:9090"
+
+volumes:
+  bsio_pgdata:

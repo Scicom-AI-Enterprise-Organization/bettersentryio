@@ -1,0 +1,27 @@
+{{define "content"}}
+<h2>Incident log</h2>
+<p class="sub">Open incidents first, then most recent. "Alerts sent" counts confirmed deliveries —
+a zero on an open incident means the alert has not reached a channel yet and is still being retried.</p>
+
+{{if not .Data}}
+<div class="empty"><p><b>No incidents.</b> Nothing has gone missing or stalled since this instance started.</p></div>
+{{else}}
+<div class="tablewrap">
+<table>
+<thead><tr><th>Monitor</th><th>Kind</th><th>Opened</th><th>Resolved</th><th class="num">Duration</th><th class="num">Alerts sent</th></tr></thead>
+<tbody>
+{{range .Data}}
+<tr class="{{if .Open}}row-bad{{end}}">
+  <td><a class="slug" href="/monitors/{{.Monitor}}">{{.Monitor}}</a><span class="meta">{{.Environment}}</span></td>
+  <td><span class="pill {{if eq .Kind "stalled"}}stalled{{else}}missing{{end}}">{{.Kind}}</span></td>
+  <td class="num">{{stamp .OpenedAt}}</td>
+  <td class="num">{{if .Open}}<span class="pill missing">ongoing</span>{{else}}{{stamp .ResolvedAt}}{{end}}</td>
+  <td class="num">{{dur .Duration}}</td>
+  <td class="num {{if eq .Delivered 0}}dim{{end}}">{{.Delivered}}{{if and .Open (eq .Delivered 0)}} <span class="meta">retrying</span>{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{end}}
+{{end}}

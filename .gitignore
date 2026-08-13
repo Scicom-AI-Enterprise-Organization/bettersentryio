@@ -1,0 +1,14 @@
+bin/
+*.log
+.DS_Store
+.env
+
+# frontend (web/ is the vendored Scicom Enterprise-Template)
+web/node_modules/
+web/.next/
+web/.env
+web/tsconfig.tsbuildinfo
+
+# Example service scratch: venv and the SDK copy fetched from a running engine.
+examples/*/.venv/
+examples/*/bettersentryio.py

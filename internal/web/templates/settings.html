@@ -1,0 +1,60 @@
+{{define "content"}}
+{{with .Data}}
+<h2>Projects and ingest keys</h2>
+<p class="sub">A key is all a service needs to send heartbeats. Monitors are created by their first beat.</p>
+
+{{range .Projects}}
+<div class="card">
+  <div class="cardhead"><b>{{.Name}}</b><span class="meta">{{.Slug}} · created {{since .CreatedAt}} ago</span></div>
+  {{if not .Keys}}<p class="meta">No active keys.</p>{{end}}
+  {{range .Keys}}
+  <div class="keyrow">
+    <code class="key">{{.PublicKey}}</code>
+    {{if .Revoked}}<span class="pill missing">revoked</span>{{else}}<span class="pill ok">active</span>{{end}}
+    <span class="meta">added {{since .CreatedAt}} ago</span>
+  </div>
+  {{if not .Revoked}}
+  <pre class="snippet">curl "{{$.Data.Host}}/api/0/beat/my-loop?key={{.PublicKey}}&amp;every=30&amp;progress=$COUNTER"</pre>
+  {{end}}
+  {{end}}
+</div>
+{{end}}
+
+<h2>Alert channels</h2>
+<p class="sub">Every state change is delivered to each enabled channel exactly once, and retried until
+it lands. Targets are shown with their path removed — a chat webhook URL is itself a credential.</p>
+
+{{if not .Channels}}
+<div class="empty">
+  <p><b>No channels configured — alerts have nowhere to go.</b> Detection still works and incidents
+  are recorded, but nobody gets told.</p>
+  <pre>bettersentryio serve --alert-webhook 'https://hooks.slack.com/services/…' --alert-type slack</pre>
+  <p class="sub">Types: <code>webhook</code>, <code>slack</code>, <code>teams</code>. Telegram needs a
+  <code>bot_token</code> and <code>chat_id</code>, so insert it into the <code>channels</code> table directly.</p>
+</div>
+{{else}}
+<div class="tablewrap">
+<table>
+<thead><tr><th>Name</th><th>Type</th><th>Target</th><th>State</th></tr></thead>
+<tbody>
+{{range .Channels}}
+<tr>
+  <td><b>{{.Name}}</b></td>
+  <td><span class="pill ok">{{.Type}}</span></td>
+  <td class="num dim">{{.Target}}</td>
+  <td>{{if .Enabled}}<span class="pill ok">enabled</span>{{else}}<span class="pill waiting">disabled</span>{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{end}}
+
+<h2>This instance</h2>
+<table class="kv">
+  <tr><td>Base URL</td><td class="num">{{.Host}}</td></tr>
+  <tr><td>Health</td><td class="num"><a href="/-/health">/-/health</a> — reports our own loop ages</td></tr>
+  <tr><td>Monitors JSON</td><td class="num"><a href="/api/0/monitors">/api/0/monitors</a></td></tr>
+</table>
+{{end}}
+{{end}}

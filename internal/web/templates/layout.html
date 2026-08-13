@@ -1,0 +1,46 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · bettersentryio</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%233ecfa8'/></svg>">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><span class="pulse"></span>bettersentryio</a>
+  <nav>
+    <a href="/" class="{{if eq .Nav "monitors"}}on{{end}}">Monitors</a>
+    <a href="/incidents" class="{{if eq .Nav "incidents"}}on{{end}}">Incidents
+      {{if .Summary.OpenIncidents}}<span class="badge">{{.Summary.OpenIncidents}}</span>{{end}}</a>
+    <a href="/settings" class="{{if eq .Nav "settings"}}on{{end}}">Settings</a>
+  </nav>
+  <div class="topright">
+    {{if .Summary.Unhealthy}}<span class="dot bad"></span>{{.Summary.Unhealthy}} need attention
+    {{else}}<span class="dot good"></span>all clear{{end}}
+    <form method="post" action="/logout"><button class="linkish">Sign out</button></form>
+  </div>
+</header>
+
+{{if .Warn}}
+<div class="banner">
+  <b>Default credentials in use.</b> This instance accepts <code>admin</code> / <code>12345</code>.
+  Set <code>--admin-password-file</code> (or <code>BSIO_ADMIN_PASSWORD</code>) before anyone else can reach it.
+</div>
+{{end}}
+
+<main>
+{{template "content" .}}
+</main>
+
+<footer class="foot">
+  bettersentryio · rendered {{.Now.Format "15:04:05"}} · page refreshes every 10s
+</footer>
+<script>
+  // Refresh on a timer rather than polling fragments: the whole page is cheap and
+  // this keeps the wall honest without a JS framework.
+  setTimeout(function () { location.reload(); }, 10000);
+</script>
+</body>
+</html>{{end}}
