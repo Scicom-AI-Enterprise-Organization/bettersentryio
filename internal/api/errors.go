@@ -54,6 +54,7 @@ func (s *Server) handleIngestError(w http.ResponseWriter, r *http.Request) {
 	}
 	if res.IsNew {
 		s.log.Info("new issue", "issue", res.IssueID, "culprit", res.Culprit)
+		s.notifyNewIssue(r.Context(), projectID, res)
 	}
 	writeJSON(w, http.StatusAccepted, res)
 }

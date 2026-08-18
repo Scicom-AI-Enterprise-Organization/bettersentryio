@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -263,7 +264,7 @@ func payload(ch channel, ev Event) (url string, body []byte, contentType string,
 		if ev.URL != "" {
 			card["potentialAction"] = []map[string]any{{
 				"@type":   "OpenUri",
-				"name":    "Open monitor",
+				"name":    linkLabel(ev),
 				"targets": []map[string]string{{"os": "default", "uri": ev.URL}},
 			}}
 		}
@@ -288,6 +289,15 @@ func payload(ch channel, ev Event) (url string, body []byte, contentType string,
 		return "", nil, "", fmt.Errorf("channel %s has no url configured", ch.name)
 	}
 	return url, body, contentType, nil
+}
+
+// linkLabel names the card's button for what it opens: monitor alerts predate
+// issue alerts, and "Open monitor" on an error issue reads wrong.
+func linkLabel(ev Event) string {
+	if strings.HasPrefix(ev.Kind, "issue") {
+		return "Open issue"
+	}
+	return "Open monitor"
 }
 
 func themeColor(severity string) string {

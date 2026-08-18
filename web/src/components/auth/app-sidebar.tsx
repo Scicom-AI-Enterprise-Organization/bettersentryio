@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, Users, ShieldCheck, Building2, UserCog, Sparkles } from "lucide-react";
+import { LayoutDashboard, Users, ShieldCheck, Building2, UserCog, Sparkles, BellRing } from "lucide-react";
 import { PageSidebar } from "@/components/page-sidebar";
 
 export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
@@ -20,6 +20,7 @@ export function AppSidebar({ isAdmin }: { isAdmin: boolean }) {
               { label: "Users", href: "/admin/users", icon: Users },
               { label: "Roles", href: "/admin/roles", icon: ShieldCheck },
               { label: "Organization", href: "/admin/organization", icon: Building2 },
+              { label: "Alerts", href: "/admin/alerts", icon: BellRing },
             ],
           },
         ]

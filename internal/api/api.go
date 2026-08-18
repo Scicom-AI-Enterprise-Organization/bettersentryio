@@ -35,6 +35,7 @@ type Server struct {
 	alerter  *alert.Alerter
 	log      *slog.Logger
 	version  string
+	baseURL  string
 	started  time.Time
 	session  SessionChecker
 	envLimit envelopeLimiter
@@ -43,10 +44,11 @@ type Server struct {
 // New builds the HTTP surface. apiToken is the operator credential the UI presents;
 // when empty the admin endpoints fall back to accepting any ingest key, which is a
 // development convenience the caller is expected to warn about loudly.
-func New(db *store.DB, e *monitor.Engine, d *monitor.Detector, a *alert.Alerter, log *slog.Logger, version, apiToken string, session SessionChecker) *Server {
+func New(db *store.DB, e *monitor.Engine, d *monitor.Detector, a *alert.Alerter, log *slog.Logger, version, apiToken, baseURL string, session SessionChecker) *Server {
 	return &Server{
 		db: db, events: events.New(db), engine: e, detector: d, alerter: a, log: log,
-		version: version, apiToken: apiToken, started: time.Now(), session: session,
+		version: version, apiToken: apiToken, baseURL: strings.TrimRight(baseURL, "/"),
+		started: time.Now(), session: session,
 	}
 }
 
@@ -125,6 +127,9 @@ func (s *Server) Handler(ui interface{ Routes(*http.ServeMux) }) http.Handler {
 	// never collide with the /api/0/ control surface.
 	mux.HandleFunc("POST /api/{projectID}/envelope/{$}", s.handleEnvelope)
 	mux.HandleFunc("POST /api/{projectID}/envelope", s.handleEnvelope)
+	// Issue alert channel settings (internal/api/alerts.go).
+	mux.HandleFunc("GET /api/0/alerts/teams", s.handleGetTeamsAlert)
+	mux.HandleFunc("PUT /api/0/alerts/teams", s.handleSetTeamsAlert)
 	// Error tracking (internal/api/errors.go). Ingest takes an ingest key like a beat;
 	// reading takes a session or a key; resolving takes the operator token.
 	mux.HandleFunc("POST /api/0/errors", s.handleIngestError)

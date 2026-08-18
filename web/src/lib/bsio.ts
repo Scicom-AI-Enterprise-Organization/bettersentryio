@@ -287,6 +287,33 @@ export function getIssue(id: number | string) {
   return get<IssueDetail>(`/api/0/issues/${id}`);
 }
 
+/* ---- alerting ---------------------------------------------------------------- */
+
+export type TeamsAlert = { configured: boolean; url_masked: string };
+
+export function getTeamsAlert() {
+  return get<TeamsAlert>("/api/0/alerts/teams");
+}
+
+/** Empty url disables the channel without forgetting it. */
+export async function setTeamsAlert(url: string): Promise<Result<TeamsAlert>> {
+  try {
+    const res = await fetch(`${BASE}/api/0/alerts/teams`, {
+      method: "PUT",
+      headers: { "X-BSIO-Key": KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      return { ok: false, error: body?.error ?? `The engine returned ${res.status}.` };
+    }
+    return { ok: true, data: (await res.json()) as TeamsAlert };
+  } catch {
+    return { ok: false, error: "Cannot reach the bettersentryio engine." };
+  }
+}
+
 export function getApp(slug: string) {
   return get<{ app: App; monitors: Monitor[] }>(`/api/0/apps/${encodeURIComponent(slug)}`);
 }

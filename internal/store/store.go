@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -311,6 +312,40 @@ func (db *DB) EnsureChannel(ctx context.Context, name, kind, configJSON string) 
 		values ($1, $2, $3::jsonb, true)
 		on conflict (name) do update set type = excluded.type, config = excluded.config, enabled = true`,
 		name, kind, configJSON)
+	return err
+}
+
+// ProjectMeta returns a project's slug and display name, or empty strings if
+// the id is unknown.
+func (db *DB) ProjectMeta(ctx context.Context, id int64) (slug, name string, err error) {
+	err = db.QueryRow(ctx, `select slug, name from projects where id = $1`, id).Scan(&slug, &name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", nil
+	}
+	return slug, name, err
+}
+
+// ChannelByName fetches one alert channel's config, for the settings UI.
+func (db *DB) ChannelByName(ctx context.Context, name string) (kind string, config map[string]string, enabled, found bool, err error) {
+	var raw []byte
+	err = db.QueryRow(ctx,
+		`select type, config, enabled from channels where name = $1`, name,
+	).Scan(&kind, &raw, &enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, false, false, nil
+	}
+	if err != nil {
+		return "", nil, false, false, err
+	}
+	config = map[string]string{}
+	_ = json.Unmarshal(raw, &config)
+	return kind, config, enabled, true, nil
+}
+
+// SetChannelEnabled flips a channel without losing its config. Disabling a
+// missing channel is a no-op, not an error.
+func (db *DB) SetChannelEnabled(ctx context.Context, name string, enabled bool) error {
+	_, err := db.Exec(ctx, `update channels set enabled = $2 where name = $1`, name, enabled)
 	return err
 }
 

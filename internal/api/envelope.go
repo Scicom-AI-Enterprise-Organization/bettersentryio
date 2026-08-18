@@ -287,6 +287,7 @@ func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request) {
 		}
 		if res.IsNew {
 			s.log.Info("new issue", "issue", res.IssueID, "culprit", res.Culprit, "via", "envelope")
+			s.notifyNewIssue(r.Context(), projectID, res)
 		}
 	}
 

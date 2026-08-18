@@ -189,7 +189,7 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 	if err != nil {
 		return err
 	}
-	server := api.New(db, engine, detector, alerter, log.With("component", "http"), version, cfg.apiToken, auth)
+	server := api.New(db, engine, detector, alerter, log.With("component", "http"), version, cfg.apiToken, cfg.baseURL, auth)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.listen,

@@ -207,6 +207,10 @@ type Ingested struct {
 	IsNew     bool   `json:"is_new"`
 	TimesSeen int64  `json:"times_seen"`
 	Culprit   string `json:"culprit"`
+	// For the new-issue alert, not for the SDK response.
+	Title       string `json:"-"`
+	Level       string `json:"-"`
+	Environment string `json:"-"`
 }
 
 /* ---- grouping --------------------------------------------------------------
@@ -420,6 +424,9 @@ func (s *Store) IngestRaw(ctx context.Context, projectID int64, e *Event, raw []
 		return out, err
 	}
 	out.Culprit = culprit
+	out.Title = title
+	out.Level = level
+	out.Environment = env
 	return out, nil
 }
 
