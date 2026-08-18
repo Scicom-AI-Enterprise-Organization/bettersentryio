@@ -274,6 +274,8 @@ export type EventPayload = {
   contexts?: Record<string, Record<string, unknown>> | null;
   breadcrumbs?: { values?: { timestamp?: string | number; type?: string; category?: string; level?: string; message?: string }[] } | { timestamp?: string | number; category?: string; level?: string; message?: string }[] | null;
   sdk?: { name?: string; version?: string } | null;
+  user?: Record<string, unknown> | null;
+  modules?: Record<string, string> | null;
 };
 
 export type IssueDetail = {

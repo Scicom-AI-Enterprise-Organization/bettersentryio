@@ -151,20 +151,73 @@ export default async function ErrorIssuePage({
 
       {/* ---- tags ----------------------------------------------------------- */}
       {tags && Object.keys(tags).length > 0 && (
-        <section className="flex flex-wrap gap-1.5">
-          {Object.entries(tags).map(([k, v]) => (
-            <span
-              key={k}
-              className="rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs"
-            >
-              <span className="text-muted-foreground">{k}:</span> {v}
+        <SectionCard title="Tags">
+          <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
+            <KVRows
+              rows={Object.entries(tags)
+                .sort()
+                .filter((_, n) => n % 2 === 0)}
+            />
+            <KVRows
+              rows={Object.entries(tags)
+                .sort()
+                .filter((_, n) => n % 2 === 1)}
+            />
+          </div>
+        </SectionCard>
+      )}
+
+      {/* ---- event header: identity + quick chips + raw JSON ------------------- */}
+      {ev && (
+        <section className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border pb-3 font-mono text-xs">
+          {ev.event_id && <span className="font-semibold">ID: {String(ev.event_id).slice(0, 8)}</span>}
+          {recent[currentIdx] && (
+            <span className="text-muted-foreground"><Ago iso={recent[currentIdx].received_at} /></span>
+          )}
+          <Link
+            href={`/apps/${slug}/errors/${issue.id}/json${recent[currentIdx] ? `?event=${recent[currentIdx].id}` : ""}`}
+            className="text-primary hover:underline"
+            prefetch={false}
+          >
+            JSON
+          </Link>
+          <span className="text-muted-foreground">·</span>
+          {typeof ev.user?.ip_address === "string" && (
+            <span className="text-muted-foreground">{ev.user.ip_address}</span>
+          )}
+          {ev.contexts?.runtime && (
+            <span className="text-muted-foreground">
+              {String(ev.contexts.runtime.name ?? "")} {String(ev.contexts.runtime.version ?? "")}
             </span>
-          ))}
+          )}
+          {ev.release && <span className="text-muted-foreground">📦 {ev.release}</span>}
+          {ev.environment && <span className="text-muted-foreground">{ev.environment}</span>}
         </section>
       )}
 
+      {/* ---- highlights: the fields you read first, curated like Sentry's ------ */}
+      {tags && (
+        <SectionCard title="Highlights">
+          <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
+            <KVRows
+              rows={(["handled", "level", "mechanism", "transaction"] as const)
+                .filter((k) => tags[k])
+                .map((k) => [k, tags[k]] as [string, string])}
+            />
+            <KVRows
+              rows={[
+                ...(tags.url ? ([["url", tags.url]] as [string, string][]) : []),
+                ...(typeof ev?.contexts?.trace?.trace_id === "string"
+                  ? ([["trace id", String(ev.contexts.trace.trace_id)]] as [string, string][])
+                  : []),
+              ]}
+            />
+          </div>
+        </SectionCard>
+      )}
+
       {/* ---- message-only events --------------------------------------------- */}
-      {excs.length === 0 && message && (
+      {message && (
         <SectionCard title="Message">
           <p className="whitespace-pre-wrap font-mono text-sm">{message}</p>
           {ev?.logger && (
@@ -198,17 +251,38 @@ export default async function ErrorIssuePage({
             {ev.request.query_string ? `?${ev.request.query_string}` : ""}
           </p>
           {ev.request.headers && (
-            <KVRows
-              rows={Object.entries(ev.request.headers).map(([k, v]) => [k, String(v)])}
-            />
+            <>
+              <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Headers</p>
+              <KVRows
+                rows={Object.entries(ev.request.headers).map(([k, v]) => [k, String(v)])}
+              />
+            </>
+          )}
+          {(ev.request as { env?: Record<string, unknown> }).env && (
+            <>
+              <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Environment</p>
+              <KVRows
+                rows={Object.entries((ev.request as { env?: Record<string, unknown> }).env ?? {}).map(
+                  ([k, v]) => [k, String(v)],
+                )}
+              />
+            </>
           )}
         </SectionCard>
       )}
 
       {/* ---- contexts: URL values become links (the Grafana pattern) ---------- */}
+      {ev?.user && Object.keys(ev.user).length > 0 && (
+        <SectionCard title="Context — user">
+          <KVRows
+            rows={Object.entries(ev.user)
+              .filter(([, v]) => v !== null && v !== undefined)
+              .map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)])}
+          />
+        </SectionCard>
+      )}
       {contexts &&
         Object.entries(contexts)
-          .filter(([k]) => k !== "trace")
           .map(([name, ctx]) => (
             <SectionCard key={name} title={`Context — ${name}`}>
               <KVRows
@@ -252,6 +326,37 @@ export default async function ErrorIssuePage({
             ))}
           </div>
         </SectionCard>
+      )}
+
+      {/* ---- additional data (extra) ------------------------------------------- */}
+      {ev?.extra && Object.keys(ev.extra).length > 0 && (
+        <SectionCard title="Additional data">
+          <KVRows
+            rows={Object.entries(ev.extra).map(([k, v]) => [
+              k,
+              typeof v === "string" ? v : JSON.stringify(v),
+            ])}
+          />
+        </SectionCard>
+      )}
+
+      {/* ---- packages, collapsed: useful for "which venv was this" ------------- */}
+      {ev?.modules && Object.keys(ev.modules).length > 0 && (
+        <details className="rounded-xl border border-border p-5">
+          <summary className="cursor-pointer text-sm font-semibold tracking-tight">
+            Packages ({Object.keys(ev.modules).length})
+          </summary>
+          <div className="mt-3 grid gap-x-8 gap-y-1 sm:grid-cols-3">
+            {Object.entries(ev.modules)
+              .sort()
+              .map(([k, v]) => (
+                <div key={k} className="flex gap-3 font-mono text-xs">
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">{k}</span>
+                  <span className="tabular-nums">{v}</span>
+                </div>
+              ))}
+          </div>
+        </details>
       )}
 
       {ev?.sdk?.name && (
