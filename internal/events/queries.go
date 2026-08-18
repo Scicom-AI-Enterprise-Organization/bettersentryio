@@ -21,6 +21,16 @@ type Issue struct {
 	FirstSeen   time.Time  `json:"first_seen"`
 	LastSeen    time.Time  `json:"last_seen"`
 	ResolvedAt  *time.Time `json:"resolved_at"`
+	// Activity is the last 24 hours of events, one bucket per hour, oldest
+	// first — the issue list's trend sparkline. Filled by Issues(), not by the
+	// detail lookup.
+	Activity []TrendBucket `json:"activity,omitempty"`
+}
+
+// TrendBucket is one hour of an issue's event volume.
+type TrendBucket struct {
+	At    time.Time `json:"at"`
+	Count int64     `json:"count"`
 }
 
 const issueColumns = `
@@ -55,7 +65,62 @@ func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved 
 		}
 		out = append(out, i)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.fillActivity(ctx, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// fillActivity attaches the 24-hour trend to each issue: one grouped query for
+// the whole page, never one per row.
+func (s *Store) fillActivity(ctx context.Context, issues []Issue) error {
+	if len(issues) == 0 {
+		return nil
+	}
+	ids := make([]int64, len(issues))
+	for n, i := range issues {
+		ids[n] = i.ID
+	}
+	rows, err := s.db.Query(ctx, `
+		select issue_id, date_trunc('hour', received_at), count(*)
+		from events
+		where issue_id = any($1) and received_at > now() - interval '24 hours'
+		group by 1, 2`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	counts := map[int64]map[time.Time]int64{}
+	for rows.Next() {
+		var id int64
+		var at time.Time
+		var n int64
+		if err := rows.Scan(&id, &at, &n); err != nil {
+			return err
+		}
+		if counts[id] == nil {
+			counts[id] = map[time.Time]int64{}
+		}
+		counts[id][at.UTC()] = n
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	newest := time.Now().UTC().Truncate(time.Hour)
+	for n := range issues {
+		buckets := make([]TrendBucket, 24)
+		for h := 0; h < 24; h++ {
+			at := newest.Add(time.Duration(h-23) * time.Hour)
+			buckets[h] = TrendBucket{At: at, Count: counts[issues[n].ID][at]}
+		}
+		issues[n].Activity = buckets
+	}
+	return nil
 }
 
 // Counts is the header for a project's issue list.

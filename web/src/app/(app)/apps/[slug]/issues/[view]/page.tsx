@@ -252,7 +252,9 @@ function ErrorIssues({ slug, issues }: { slug: string; issues: Issue[] }) {
               <TableRow>
                 <TableHead>Issue</TableHead>
                 <TableHead>Level</TableHead>
-                <TableHead className="text-right">Seen</TableHead>
+                <TableHead>Trend · 24h</TableHead>
+                <TableHead className="text-right">Events</TableHead>
+                <TableHead className="text-right">Age</TableHead>
                 <TableHead>Last seen</TableHead>
                 <TableHead>Environment</TableHead>
               </TableRow>
@@ -272,8 +274,21 @@ function ErrorIssues({ slug, issues }: { slug: string; issues: Issue[] }) {
                   <TableCell>
                     <StatusPill tone={levelTone(i.level)}>{i.level}</StatusPill>
                   </TableCell>
+                  <TableCell>
+                    <ActivityBars
+                      buckets={(i.activity ?? []).map((b) => ({
+                        at: b.at,
+                        beats: b.count,
+                        progress_delta: 0,
+                      }))}
+                      className="h-6 w-28"
+                    />
+                  </TableCell>
                   <TableCell className="text-right font-mono text-sm tabular-nums">
                     {i.times_seen}×
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs tabular-nums text-muted-foreground">
+                    {shortDuration(Math.max(60, (Date.now() - Date.parse(i.first_seen)) / 1000))}
                   </TableCell>
                   <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
                     <Ago iso={i.last_seen} />

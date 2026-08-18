@@ -221,6 +221,8 @@ export type Issue = {
   first_seen: string;
   last_seen: string;
   resolved_at: string | null;
+  /** Last 24h of events, one bucket per hour, oldest first. */
+  activity: { at: string; count: number }[] | null;
 };
 
 export type IssueCounts = { open: number; resolved: number };
