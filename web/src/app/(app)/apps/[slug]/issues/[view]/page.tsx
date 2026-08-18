@@ -247,29 +247,33 @@ function ErrorIssues({ slug, issues }: { slug: string; issues: Issue[] }) {
         </p>
       ) : (
         <TableCard>
-          <Table>
+          {/* table-fixed: without it a long unbroken error title stretches the
+              first column past the viewport and every other column lives in an
+              invisible horizontal scroll — "why there's no column". */}
+          <Table className="table-fixed">
             <TableHeader>
               <TableRow>
                 <TableHead>Issue</TableHead>
-                <TableHead>Level</TableHead>
-                <TableHead>Trend · 24h</TableHead>
-                <TableHead className="text-right">Events</TableHead>
-                <TableHead className="text-right">Age</TableHead>
-                <TableHead>Last seen</TableHead>
-                <TableHead>Environment</TableHead>
+                <TableHead className="w-24">Level</TableHead>
+                <TableHead className="w-36">Trend · 24h</TableHead>
+                <TableHead className="w-20 text-right">Events</TableHead>
+                <TableHead className="w-24 text-right">Age</TableHead>
+                <TableHead className="w-28">Last seen</TableHead>
+                <TableHead className="w-32">Environment</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {issues.map((i) => (
                 <TableRow key={i.id}>
-                  <TableCell>
+                  <TableCell className="max-w-0">
                     <Link
                       href={`/apps/${slug}/errors/${i.id}`}
-                      className="text-sm font-medium hover:underline"
+                      title={i.title}
+                      className="block truncate text-sm font-medium hover:underline"
                     >
                       {i.title}
                     </Link>
-                    <div className="font-mono text-xs text-muted-foreground">{i.culprit}</div>
+                    <div className="truncate font-mono text-xs text-muted-foreground">{i.culprit}</div>
                   </TableCell>
                   <TableCell>
                     <StatusPill tone={levelTone(i.level)}>{i.level}</StatusPill>
@@ -293,7 +297,7 @@ function ErrorIssues({ slug, issues }: { slug: string; issues: Issue[] }) {
                   <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
                     <Ago iso={i.last_seen} />
                   </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
+                  <TableCell className="truncate font-mono text-xs text-muted-foreground">
                     {i.environment}
                   </TableCell>
                 </TableRow>
