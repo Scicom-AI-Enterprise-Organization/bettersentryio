@@ -221,6 +221,10 @@ export type Issue = {
   first_seen: string;
   last_seen: string;
   resolved_at: string | null;
+  archived_at: string | null;
+  archived_until: string | null;
+  archive_recur: boolean;
+  priority: string;
   /** Client tags merged with server-derived ones (level, url, mechanism, ...). */
   tags: Record<string, string> | null;
   /** Last 24h of events, one bucket per hour, oldest first. */
@@ -278,11 +282,41 @@ export type IssueDetail = {
   recent: { id: number; received_at: string; message: string }[];
 };
 
-export function getIssues(project: string, includeResolved = false) {
-  const q = includeResolved ? "&resolved=true" : "";
+export function getIssues(project: string, opts?: { resolved?: boolean; archived?: boolean }) {
+  const q =
+    (opts?.resolved ? "&resolved=true" : "") + (opts?.archived ? "&archived=true" : "");
   return get<{ issues: Issue[]; counts: IssueCounts }>(
     `/api/0/issues?project=${encodeURIComponent(project)}${q}`,
   );
+}
+
+/** Live triage state, derived the same way the engine filters. */
+export function issueStatus(i: Issue): "open" | "resolved" | "archived" {
+  if (i.archived_at && (!i.archived_until || Date.parse(i.archived_until) > Date.now())) {
+    return "archived";
+  }
+  if (i.resolved_at) return "resolved";
+  return "open";
+}
+
+export function resolveIssue(id: number, resolved: boolean) {
+  return write<{ issue: number }>(`/api/0/issues/${id}/resolve?resolved=${resolved}`, "POST");
+}
+
+export function archiveIssue(id: number, mode: "forever" | "for" | "recur" | "off", hours?: number) {
+  return write<{ issue: number }>(`/api/0/issues/${id}/archive`, "POST", { mode, hours });
+}
+
+export function setIssuePriority(id: number, priority: string) {
+  return write<{ issue: number }>(`/api/0/issues/${id}/priority`, "POST", { priority });
+}
+
+export function deleteIssue(id: number) {
+  return write<{ deleted: number }>(`/api/0/issues/${id}`, "DELETE");
+}
+
+export function getIssueEvent(issueID: number | string, eventID: number | string) {
+  return get<{ id: number; payload: EventPayload }>(`/api/0/issues/${issueID}/events/${eventID}`);
 }
 
 export function getIssue(id: number | string) {

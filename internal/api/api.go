@@ -140,6 +140,10 @@ func (s *Server) Handler(ui interface{ Routes(*http.ServeMux) }) http.Handler {
 	mux.HandleFunc("GET /api/0/issues", s.handleIssues)
 	mux.HandleFunc("GET /api/0/issues/{id}", s.handleIssueDetail)
 	mux.HandleFunc("POST /api/0/issues/{id}/resolve", s.handleResolveIssue)
+	mux.HandleFunc("POST /api/0/issues/{id}/archive", s.handleArchiveIssue)
+	mux.HandleFunc("POST /api/0/issues/{id}/priority", s.handleIssuePriority)
+	mux.HandleFunc("DELETE /api/0/issues/{id}", s.handleDeleteIssue)
+	mux.HandleFunc("GET /api/0/issues/{id}/events/{eventID}", s.handleIssueEvent)
 	// The SDK sources, so a service can curl the client off the engine it reports to.
 	clients.Routes(mux)
 	// Health and readiness stay unauthenticated: a probe should not need a session,

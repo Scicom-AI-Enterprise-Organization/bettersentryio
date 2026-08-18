@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { requireUser } from "@/lib/rbac";
-import { getApp, getIssue } from "@/lib/bsio";
+import { getApp, getIssue, getIssueEvent, issueStatus } from "@/lib/bsio";
 import type { EventFrame, EventPayload } from "@/lib/bsio";
+import { IssueActions } from "./issue-actions";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -23,11 +24,14 @@ export const revalidate = 0;
  */
 export default async function ErrorIssuePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string; id: string }>;
+  searchParams: Promise<{ event?: string }>;
 }) {
   await requireUser();
   const { slug, id } = await params;
+  const { event: eventParam } = await searchParams;
 
   const [appResult, issueResult] = await Promise.all([getApp(slug), getIssue(id)]);
   if (!issueResult.ok) {
@@ -39,8 +43,24 @@ export default async function ErrorIssuePage({
       </Alert>
     );
   }
-  const { issue, latest_event: ev, recent } = issueResult.data;
+  const { issue, latest_event: latest, recent } = issueResult.data;
   const app = appResult.ok ? appResult.data.app : null;
+
+  // Event browsing: ?event=<id> renders that stored occurrence instead of the
+  // newest one; prev/next step through the recent list (newest first).
+  let ev: EventPayload | null | undefined = latest;
+  let currentIdx = 0;
+  if (eventParam && recent.length > 0) {
+    const idx = recent.findIndex((r) => String(r.id) === eventParam);
+    if (idx >= 0) {
+      currentIdx = idx;
+      const one = await getIssueEvent(id, eventParam);
+      if (one.ok) ev = one.data.payload;
+    }
+  }
+  const newer = currentIdx > 0 ? recent[currentIdx - 1] : null;
+  const older = currentIdx < recent.length - 1 ? recent[currentIdx + 1] : null;
+  const status = issueStatus(issue);
 
   const excs = ev?.exception?.values ?? [];
   const message = ev?.message || ev?.logentry?.formatted || ev?.logentry?.message || "";
@@ -82,8 +102,52 @@ export default async function ErrorIssuePage({
         {ev?.server_name && (
           <span className="font-mono text-xs text-muted-foreground">{ev.server_name}</span>
         )}
-        {issue.resolved_at && <StatusPill tone="muted">resolved</StatusPill>}
+        {status === "resolved" && <StatusPill tone="active">resolved</StatusPill>}
+        {status === "archived" && (
+          <StatusPill tone="muted">
+            archived{issue.archive_recur ? " · until it recurs" : issue.archived_until ? " · temporary" : ""}
+          </StatusPill>
+        )}
       </section>
+
+      {/* ---- actions ---------------------------------------------------------- */}
+      <IssueActions
+        id={issue.id}
+        slug={slug}
+        resolved={status === "resolved"}
+        archived={status === "archived"}
+        priority={issue.priority}
+      />
+
+      {/* ---- event navigation -------------------------------------------------- */}
+      {recent.length > 1 && (
+        <section className="flex flex-wrap items-center gap-3 text-sm">
+          {newer ? (
+            <Link
+              className="text-primary hover:underline"
+              href={`/apps/${slug}/errors/${issue.id}?event=${newer.id}`}
+            >
+              ← newer
+            </Link>
+          ) : (
+            <span className="text-muted-foreground">← newer</span>
+          )}
+          <span className="font-mono text-xs text-muted-foreground">
+            event {currentIdx + 1} of {recent.length} recent
+            {recent[currentIdx] && <> · <ClockAt iso={recent[currentIdx].received_at} /></>}
+          </span>
+          {older ? (
+            <Link
+              className="text-primary hover:underline"
+              href={`/apps/${slug}/errors/${issue.id}?event=${older.id}`}
+            >
+              older →
+            </Link>
+          ) : (
+            <span className="text-muted-foreground">older →</span>
+          )}
+        </section>
+      )}
 
       {/* ---- tags ----------------------------------------------------------- */}
       {tags && Object.keys(tags).length > 0 && (
@@ -175,12 +239,16 @@ export default async function ErrorIssuePage({
         <SectionCard title="Recent events in this issue">
           <div className="space-y-1">
             {recent.map((r) => (
-              <div key={r.id} className="flex gap-3 font-mono text-xs">
+              <Link
+                key={r.id}
+                href={`/apps/${slug}/errors/${issue.id}?event=${r.id}`}
+                className="flex gap-3 font-mono text-xs hover:bg-muted/40"
+              >
                 <span className="w-40 shrink-0 tabular-nums text-muted-foreground">
                   <ClockAt iso={r.received_at} />
                 </span>
                 <span className="min-w-0 break-all">{r.message}</span>
-              </div>
+              </Link>
             ))}
           </div>
         </SectionCard>

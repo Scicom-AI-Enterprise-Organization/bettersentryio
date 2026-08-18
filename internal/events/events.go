@@ -465,7 +465,11 @@ func (s *Store) IngestRaw(ctx context.Context, projectID int64, e *Event, raw []
 		       title       = excluded.title,
 		       culprit     = excluded.culprit,
 		       level       = excluded.level,
-		       tags        = excluded.tags
+		       tags        = excluded.tags,
+		       -- "Archive until this occurs again": the occurrence just happened.
+		       archived_at    = case when issues.archive_recur then null else issues.archived_at end,
+		       archived_until = case when issues.archive_recur then null else issues.archived_until end,
+		       archive_recur  = false
 		returning id, times_seen, (xmax = 0), (select resolved_at from prior)`,
 		projectID, fingerprint, env, kind, culprit, title, level, seen, string(tagsJSON),
 	).Scan(&out.IssueID, &out.TimesSeen, &out.IsNew, &priorResolved)

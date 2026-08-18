@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useMemo, useState, useTransition } from "react";
 import { Search } from "lucide-react";
 
 import type { Issue, Monitor } from "@/lib/bsio";
-import { monitorTone, shortDuration } from "@/lib/bsio";
+import { issueStatus, monitorTone, shortDuration } from "@/lib/bsio";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusPill } from "@/components/ui/status-pill";
 import type { StatusTone } from "@/components/ui/status-pill";
@@ -20,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { ActivityBars } from "@/components/bsio/activity-bars";
 import { Ago, ClockAt, Since } from "@/components/bsio/time";
+import { bulkArchive, bulkDelete, bulkPriority, bulkResolve, type BulkResult } from "./actions";
 
 /* Client-side filtering on the already-fetched page of rows: instant, no
  * round-trip, and honest at this scale (the list endpoint caps at 100). */
@@ -36,6 +39,12 @@ function levelTone(level: string): StatusTone {
   }
 }
 
+function statusTone(status: "open" | "resolved" | "archived"): StatusTone {
+  if (status === "resolved") return "active";
+  if (status === "archived") return "muted";
+  return "init";
+}
+
 function FilterBar({
   search,
   setSearch,
@@ -48,6 +57,7 @@ function FilterBar({
     value: string;
     options: string[];
     set: (v: string) => void;
+    allLabel?: string;
   }[];
 }) {
   return (
@@ -68,7 +78,7 @@ function FilterBar({
           onChange={(e) => s.set(e.target.value)}
           className="h-8 rounded-md border border-input bg-transparent px-2 text-sm text-foreground"
         >
-          <option value="">{s.label}: all</option>
+          <option value="">{s.allLabel ?? `${s.label}: all`}</option>
           {s.options.map((o) => (
             <option key={o} value={o}>
               {s.label}: {o}
@@ -81,9 +91,14 @@ function FilterBar({
 }
 
 export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Issue[] }) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [level, setLevel] = useState("");
   const [env, setEnv] = useState("");
+  const [status, setStatus] = useState("open");
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [notice, setNotice] = useState<BulkResult | null>(null);
+  const [pending, startTransition] = useTransition();
 
   const levels = useMemo(() => [...new Set(issues.map((i) => i.level))].sort(), [issues]);
   const envs = useMemo(() => [...new Set(issues.map((i) => i.environment))].sort(), [issues]);
@@ -92,11 +107,26 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
     const q = search.trim().toLowerCase();
     return issues.filter(
       (i) =>
+        (!status || issueStatus(i) === status) &&
         (!level || i.level === level) &&
         (!env || i.environment === env) &&
         (!q || i.title.toLowerCase().includes(q) || i.culprit.toLowerCase().includes(q)),
     );
-  }, [issues, search, level, env]);
+  }, [issues, search, level, env, status]);
+
+  const open = issues.filter((i) => issueStatus(i) === "open").length;
+  const visibleIds = filtered.map((i) => i.id);
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+
+  const act = (fn: (ids: number[]) => Promise<BulkResult>) => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    startTransition(async () => {
+      setNotice(await fn(ids));
+      setSelected(new Set());
+      router.refresh();
+    });
+  };
 
   return (
     <section>
@@ -105,9 +135,7 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
         <span className="text-xs text-muted-foreground">
           {issues.length === 0
             ? "nothing reported"
-            : filtered.length === issues.length
-              ? `${issues.length} open issue${issues.length === 1 ? "" : "s"}`
-              : `${filtered.length} of ${issues.length} issues`}
+            : `${open} open · showing ${filtered.length}`}
         </span>
       </div>
 
@@ -121,10 +149,89 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
             search={search}
             setSearch={setSearch}
             selects={[
+              {
+                label: "status",
+                value: status,
+                options: ["open", "resolved", "archived"],
+                set: setStatus,
+                allLabel: "status: all",
+              },
               { label: "level", value: level, options: levels, set: setLevel },
               { label: "env", value: env, options: envs, set: setEnv },
             ]}
           />
+
+          {selected.size > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
+              <span className="text-sm font-medium">{selected.size} selected</span>
+              <Button size="sm" disabled={pending} onClick={() => act((ids) => bulkResolve(ids, true))}>
+                Resolve
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => act((ids) => bulkResolve(ids, false))}
+              >
+                Unresolve
+              </Button>
+              <select
+                disabled={pending}
+                value=""
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "forever") act((ids) => bulkArchive(ids, "forever"));
+                  else if (v === "1d") act((ids) => bulkArchive(ids, "for", 24));
+                  else if (v === "1w") act((ids) => bulkArchive(ids, "for", 168));
+                  else if (v === "recur") act((ids) => bulkArchive(ids, "recur"));
+                  else if (v === "off") act((ids) => bulkArchive(ids, "off"));
+                }}
+                className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+              >
+                <option value="">Archive…</option>
+                <option value="forever">Forever</option>
+                <option value="1d">For 1 day</option>
+                <option value="1w">For 1 week</option>
+                <option value="recur">Until it occurs again</option>
+                <option value="off">Unarchive</option>
+              </select>
+              <select
+                disabled={pending}
+                value=""
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v) act((ids) => bulkPriority(ids, v === "none" ? "" : v));
+                }}
+                className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+              >
+                <option value="">Set priority…</option>
+                <option value="high">High</option>
+                <option value="med">Med</option>
+                <option value="low">Low</option>
+                <option value="none">Clear</option>
+              </select>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-status-down hover:text-status-down"
+                disabled={pending}
+                onClick={() => {
+                  if (!window.confirm(`Delete ${selected.size} issue(s) and their events? This cannot be undone.`))
+                    return;
+                  act(bulkDelete);
+                }}
+              >
+                Delete
+              </Button>
+              {pending && <span className="text-xs text-muted-foreground">working…</span>}
+            </div>
+          )}
+          {notice && (
+            <p className={`mb-2 text-sm ${notice.ok ? "text-status-active" : "text-status-down"}`}>
+              {notice.message}
+            </p>
+          )}
+
           {filtered.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nothing matches the filter.</p>
           ) : (
@@ -134,8 +241,17 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
               <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-8">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={() =>
+                          setSelected(allSelected ? new Set() : new Set(visibleIds))
+                        }
+                      />
+                    </TableHead>
                     <TableHead>Issue</TableHead>
-                    <TableHead className="w-24">Level</TableHead>
+                    <TableHead className="w-28">Level</TableHead>
                     <TableHead className="w-36">Trend · 24h</TableHead>
                     <TableHead className="w-20 text-right">Events</TableHead>
                     <TableHead className="w-24 text-right">Age</TableHead>
@@ -144,47 +260,72 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((i) => (
-                    <TableRow key={i.id}>
-                      <TableCell className="max-w-0">
-                        <Link
-                          href={`/apps/${slug}/errors/${i.id}`}
-                          title={i.title}
-                          className="block truncate text-sm font-medium hover:underline"
-                        >
-                          {i.title}
-                        </Link>
-                        <div className="truncate font-mono text-xs text-muted-foreground">
-                          {i.culprit}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <StatusPill tone={levelTone(i.level)}>{i.level}</StatusPill>
-                      </TableCell>
-                      <TableCell>
-                        <ActivityBars
-                          buckets={(i.activity ?? []).map((b) => ({
-                            at: b.at,
-                            beats: b.count,
-                            progress_delta: 0,
-                          }))}
-                          className="h-6 w-28"
-                        />
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-sm tabular-nums">
-                        {i.times_seen}×
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs tabular-nums text-muted-foreground">
-                        {shortDuration(Math.max(60, (Date.now() - Date.parse(i.first_seen)) / 1000))}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
-                        <Ago iso={i.last_seen} />
-                      </TableCell>
-                      <TableCell className="truncate font-mono text-xs text-muted-foreground">
-                        {i.environment}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {filtered.map((i) => {
+                    const st = issueStatus(i);
+                    return (
+                      <TableRow key={i.id}>
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            checked={selected.has(i.id)}
+                            onChange={() => {
+                              const next = new Set(selected);
+                              if (next.has(i.id)) next.delete(i.id);
+                              else next.add(i.id);
+                              setSelected(next);
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell className="max-w-0">
+                          <Link
+                            href={`/apps/${slug}/errors/${i.id}`}
+                            title={i.title}
+                            className="block truncate text-sm font-medium hover:underline"
+                          >
+                            {i.title}
+                          </Link>
+                          <div className="truncate font-mono text-xs text-muted-foreground">
+                            {i.culprit}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col items-start gap-1">
+                            <StatusPill tone={levelTone(i.level)}>{i.level}</StatusPill>
+                            {st !== "open" && (
+                              <StatusPill tone={statusTone(st)}>{st}</StatusPill>
+                            )}
+                            {i.priority && (
+                              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">
+                                {i.priority}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <ActivityBars
+                            buckets={(i.activity ?? []).map((b) => ({
+                              at: b.at,
+                              beats: b.count,
+                              progress_delta: 0,
+                            }))}
+                            className="h-6 w-28"
+                          />
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm tabular-nums">
+                          {i.times_seen}×
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs tabular-nums text-muted-foreground">
+                          {shortDuration(Math.max(60, (Date.now() - Date.parse(i.first_seen)) / 1000))}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
+                          <Ago iso={i.last_seen} />
+                        </TableCell>
+                        <TableCell className="truncate font-mono text-xs text-muted-foreground">
+                          {i.environment}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </TableCard>

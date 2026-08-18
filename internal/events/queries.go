@@ -22,6 +22,11 @@ type Issue struct {
 	FirstSeen   time.Time  `json:"first_seen"`
 	LastSeen    time.Time  `json:"last_seen"`
 	ResolvedAt  *time.Time `json:"resolved_at"`
+	ArchivedAt  *time.Time `json:"archived_at"`
+	// ArchivedUntil: null while archived = forever; a past value = expired.
+	ArchivedUntil *time.Time `json:"archived_until"`
+	ArchiveRecur  bool       `json:"archive_recur"`
+	Priority      string     `json:"priority"`
 	// Tags: the client's tags merged with server-derived ones (level,
 	// environment, release, transaction, url, mechanism, handled, ...).
 	Tags map[string]string `json:"tags"`
@@ -39,11 +44,12 @@ type TrendBucket struct {
 
 const issueColumns = `
 	i.id, p.slug, p.name, i.fingerprint, i.environment, i.kind, i.culprit, i.title,
-	i.level, i.times_seen, i.first_seen, i.last_seen, i.resolved_at, i.tags`
+	i.level, i.times_seen, i.first_seen, i.last_seen, i.resolved_at,
+	i.archived_at, i.archived_until, i.archive_recur, i.priority, i.tags`
 
 // Issues lists a project's issues, newest sighting first. Unresolved only unless asked,
 // because the list exists to answer "what is broken now".
-func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved bool, limit int, tagFilters map[string]string) ([]Issue, error) {
+func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved, includeArchived bool, limit int, tagFilters map[string]string) ([]Issue, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
@@ -51,8 +57,10 @@ func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved 
 		select` + issueColumns + `
 		from issues i
 		join projects p on p.id = i.project_id
-		where p.slug = $1 and ($2 or i.resolved_at is null)`
-	args := []any{projectSlug, includeResolved}
+		where p.slug = $1 and ($2 or i.resolved_at is null)
+		  and ($3 or i.archived_at is null
+		       or (i.archived_until is not null and i.archived_until < now()))`
+	args := []any{projectSlug, includeResolved, includeArchived}
 	for k, v := range tagFilters {
 		query += fmt.Sprintf(" and i.tags->>$%d = $%d", len(args)+1, len(args)+2)
 		args = append(args, k, v)
@@ -71,7 +79,8 @@ func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved 
 		var i Issue
 		if err := rows.Scan(&i.ID, &i.Project, &i.ProjectName, &i.Fingerprint, &i.Environment,
 			&i.Kind, &i.Culprit, &i.Title, &i.Level, &i.TimesSeen,
-			&i.FirstSeen, &i.LastSeen, &i.ResolvedAt, &i.Tags); err != nil {
+			&i.FirstSeen, &i.LastSeen, &i.ResolvedAt,
+			&i.ArchivedAt, &i.ArchivedUntil, &i.ArchiveRecur, &i.Priority, &i.Tags); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
@@ -172,7 +181,8 @@ func (s *Store) Issue(ctx context.Context, id int64) (Detail, bool, error) {
 		&d.Issue.ID, &d.Issue.Project, &d.Issue.ProjectName, &d.Issue.Fingerprint,
 		&d.Issue.Environment, &d.Issue.Kind, &d.Issue.Culprit, &d.Issue.Title,
 		&d.Issue.Level, &d.Issue.TimesSeen, &d.Issue.FirstSeen, &d.Issue.LastSeen,
-		&d.Issue.ResolvedAt, &d.Issue.Tags)
+		&d.Issue.ResolvedAt, &d.Issue.ArchivedAt, &d.Issue.ArchivedUntil,
+		&d.Issue.ArchiveRecur, &d.Issue.Priority, &d.Issue.Tags)
 	if err != nil {
 		return d, false, nil //nolint:nilerr // absent is not an error to the caller
 	}
@@ -210,4 +220,46 @@ func (s *Store) SetResolved(ctx context.Context, id int64, resolved bool) error 
 		`update issues set resolved_at = case when $2 then now() else null end where id = $1`,
 		id, resolved)
 	return err
+}
+
+// SetArchived archives an issue three ways — forever (until nil, recur false),
+// for a duration (until set), or until it occurs again (recur true; ingest
+// clears it on the next event). Un-archiving passes archived=false.
+func (s *Store) SetArchived(ctx context.Context, id int64, archived bool, until *time.Time, recur bool) error {
+	if !archived {
+		_, err := s.db.Exec(ctx,
+			`update issues set archived_at = null, archived_until = null, archive_recur = false where id = $1`, id)
+		return err
+	}
+	_, err := s.db.Exec(ctx, `
+		update issues set archived_at = now(), archived_until = $2, archive_recur = $3 where id = $1`,
+		id, until, recur)
+	return err
+}
+
+// SetPriority stamps the triage priority ('' clears it).
+func (s *Store) SetPriority(ctx context.Context, id int64, priority string) error {
+	_, err := s.db.Exec(ctx, `update issues set priority = $2 where id = $1`, id, priority)
+	return err
+}
+
+// DeleteIssue removes an issue and its events (cascade).
+func (s *Store) DeleteIssue(ctx context.Context, id int64) (bool, error) {
+	tag, err := s.db.Exec(ctx, `delete from issues where id = $1`, id)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// EventByID returns one stored event of an issue, for prev/next browsing.
+func (s *Store) EventByID(ctx context.Context, issueID, eventID int64) (json.RawMessage, bool, error) {
+	var payload []byte
+	err := s.db.QueryRow(ctx,
+		`select payload from events where id = $1 and issue_id = $2`, eventID, issueID,
+	).Scan(&payload)
+	if err != nil {
+		return nil, false, nil //nolint:nilerr // absent is not an error to the caller
+	}
+	return payload, true, nil
 }

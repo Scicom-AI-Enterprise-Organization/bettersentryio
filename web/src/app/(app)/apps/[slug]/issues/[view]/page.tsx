@@ -47,7 +47,7 @@ export default async function ProjectIssuesPage({
     getIncidents(),
     // Error issues live on the "Errors & Outages" view; the other views are
     // monitor-state lists and never show them.
-    view.id === "outages" ? getIssues(slug) : Promise.resolve(null),
+    view.id === "outages" ? getIssues(slug, { resolved: true, archived: true }) : Promise.resolve(null),
   ]);
 
   if (!appResult.ok) {
