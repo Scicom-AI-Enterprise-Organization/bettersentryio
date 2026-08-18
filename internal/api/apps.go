@@ -11,6 +11,7 @@ import (
 )
 
 type appDTO struct {
+	ID           int64      `json:"id"`
 	Slug         string     `json:"slug"`
 	Name         string     `json:"name"`
 	Platform     string     `json:"platform"`
@@ -20,6 +21,8 @@ type appDTO struct {
 	Unhealthy    int        `json:"unhealthy"`
 	LastBeatAt   *time.Time `json:"last_beat_at"`
 	OpenIncident bool       `json:"open_incident"`
+	OpenIssues   int        `json:"open_issues"`
+	LastEventAt  *time.Time `json:"last_event_at"`
 	Connected    bool       `json:"connected"`
 }
 
@@ -37,9 +40,10 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 	out := make([]appDTO, 0, len(apps))
 	for _, a := range apps {
 		out = append(out, appDTO{
-			Slug: a.Slug, Name: a.Name, Platform: a.Platform, CreatedAt: a.CreatedAt, Key: a.Key,
+			ID: a.ID, Slug: a.Slug, Name: a.Name, Platform: a.Platform, CreatedAt: a.CreatedAt, Key: a.Key,
 			Monitors: a.Monitors, Unhealthy: a.Unhealthy, LastBeatAt: a.LastBeatAt,
-			OpenIncident: a.OpenIncident, Connected: a.Connected(),
+			OpenIncident: a.OpenIncident, OpenIssues: a.OpenIssues,
+			LastEventAt: a.LastEventAt, Connected: a.Connected(),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"apps": out})
@@ -124,9 +128,10 @@ func (s *Server) handleAppDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"app": appDTO{
-			Slug: app.Slug, Name: app.Name, Platform: app.Platform, CreatedAt: app.CreatedAt, Key: app.Key,
+			ID: app.ID, Slug: app.Slug, Name: app.Name, Platform: app.Platform, CreatedAt: app.CreatedAt, Key: app.Key,
 			Monitors: app.Monitors, Unhealthy: app.Unhealthy, LastBeatAt: app.LastBeatAt,
-			OpenIncident: app.OpenIncident, Connected: app.Connected(),
+			OpenIncident: app.OpenIncident, OpenIssues: app.OpenIssues,
+			LastEventAt: app.LastEventAt, Connected: app.Connected(),
 		},
 		"monitors": monitors,
 	})

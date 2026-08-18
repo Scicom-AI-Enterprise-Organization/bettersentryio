@@ -37,6 +37,7 @@ type Server struct {
 	version  string
 	started  time.Time
 	session  SessionChecker
+	envLimit envelopeLimiter
 }
 
 // New builds the HTTP surface. apiToken is the operator credential the UI presents;
@@ -119,6 +120,11 @@ func (s *Server) Handler(ui interface{ Routes(*http.ServeMux) }) http.Handler {
 	mux.HandleFunc("POST /api/0/apps", s.handleCreateApp)
 	mux.HandleFunc("GET /api/0/apps/{slug}", s.handleAppDetail)
 	mux.HandleFunc("DELETE /api/0/apps/{slug}", s.handleDeleteApp)
+	// Sentry-compatible ingest (D14, internal/api/envelope.go): where a stock
+	// sentry-sdk DSN points. The project id in the path is numeric, so it can
+	// never collide with the /api/0/ control surface.
+	mux.HandleFunc("POST /api/{projectID}/envelope/{$}", s.handleEnvelope)
+	mux.HandleFunc("POST /api/{projectID}/envelope", s.handleEnvelope)
 	// Error tracking (internal/api/errors.go). Ingest takes an ingest key like a beat;
 	// reading takes a session or a key; resolving takes the operator token.
 	mux.HandleFunc("POST /api/0/errors", s.handleIngestError)

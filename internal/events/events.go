@@ -20,16 +20,116 @@ import (
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/store"
 )
 
-// Frame is one stack frame. Only the fields grouping and display need.
+// FlexTime accepts Sentry's two timestamp encodings — RFC3339 string or epoch
+// float — and never fails: a timestamp we cannot parse must not sink the event,
+// so it decodes to zero and ingest stamps the arrival time instead.
+type FlexTime struct{ time.Time }
+
+func (t *FlexTime) UnmarshalJSON(b []byte) error {
+	s := strings.TrimSpace(string(b))
+	if s == "" || s == "null" || s == `""` {
+		return nil
+	}
+	if s[0] == '"' {
+		var str string
+		if json.Unmarshal(b, &str) != nil {
+			return nil
+		}
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05"} {
+			if ts, err := time.Parse(layout, str); err == nil {
+				t.Time = ts
+				return nil
+			}
+		}
+		return nil
+	}
+	var f float64
+	if json.Unmarshal(b, &f) != nil {
+		return nil
+	}
+	sec := int64(f)
+	t.Time = time.Unix(sec, int64((f-float64(sec))*1e9)).UTC()
+	return nil
+}
+
+func (t FlexTime) MarshalJSON() ([]byte, error) {
+	if t.IsZero() {
+		return []byte("null"), nil
+	}
+	return json.Marshal(t.Time)
+}
+
+// Tags accepts Sentry's two encodings — an object map or an array of [key, value]
+// pairs — and coerces non-string values, which some SDKs emit.
+type Tags map[string]string
+
+func (t *Tags) UnmarshalJSON(b []byte) error {
+	out := map[string]string{}
+	var m map[string]any
+	if json.Unmarshal(b, &m) == nil {
+		for k, v := range m {
+			out[k] = coerceString(v)
+		}
+		*t = out
+		return nil
+	}
+	var pairs [][]any
+	if json.Unmarshal(b, &pairs) == nil {
+		for _, p := range pairs {
+			if len(p) == 2 {
+				out[coerceString(p[0])] = coerceString(p[1])
+			}
+		}
+		*t = out
+	}
+	return nil // malformed tags must not sink the event
+}
+
+func coerceString(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	default:
+		b, _ := json.Marshal(x)
+		return string(b)
+	}
+}
+
+// Lines accepts a context line as either a bare string (stock sentry-sdk) or a
+// list (the legacy vendored client sent one-element lists).
+type Lines []string
+
+func (l *Lines) UnmarshalJSON(b []byte) error {
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		*l = Lines{s}
+		return nil
+	}
+	var arr []string
+	if json.Unmarshal(b, &arr) == nil {
+		*l = Lines(arr)
+	}
+	return nil
+}
+
+// Frame is one stack frame. Grouping reads module/filename/function/in_app; the
+// rest (source context, locals) rides along for display, stored in the payload.
 type Frame struct {
 	Filename string `json:"filename"`
+	AbsPath  string `json:"abs_path,omitempty"`
 	Function string `json:"function"`
 	Module   string `json:"module"`
 	Lineno   int    `json:"lineno"`
+	Colno    int    `json:"colno,omitempty"`
 	// InApp separates your code from site-packages. Grouping prefers in-app frames,
 	// because two different bugs that both end inside the same library are not one bug.
-	InApp   bool     `json:"in_app"`
-	Context []string `json:"context_line,omitempty"`
+	InApp       bool            `json:"in_app"`
+	Context     Lines           `json:"context_line,omitempty"`
+	PreContext  []string        `json:"pre_context,omitempty"`
+	PostContext []string        `json:"post_context,omitempty"`
+	Vars        json.RawMessage `json:"vars,omitempty"`
 }
 
 type Exception struct {
@@ -51,21 +151,39 @@ type Mech struct {
 	Handled *bool  `json:"handled,omitempty"`
 }
 
-// Event is what an SDK posts.
+// Event is what an SDK posts. The named fields are what grouping and the UI read;
+// pass-through blobs (contexts, breadcrumbs, user, sdk) stay raw — the stored
+// payload keeps everything the SDK sent either way.
 type Event struct {
-	EventID     string            `json:"event_id"`
-	Timestamp   *time.Time        `json:"timestamp"`
-	Level       string            `json:"level"`
-	Logger      string            `json:"logger"`
-	Message     string            `json:"message"`
-	Environment string            `json:"environment"`
-	Release     string            `json:"release"`
-	ServerName  string            `json:"server_name"`
-	Transaction string            `json:"transaction"`
-	Tags        map[string]string `json:"tags"`
-	Extra       map[string]any    `json:"extra"`
-	Request     *Request          `json:"request"`
-	Exception   *ExceptionValues  `json:"exception"`
+	EventID     string           `json:"event_id"`
+	Timestamp   *FlexTime        `json:"timestamp"`
+	Platform    string           `json:"platform,omitempty"`
+	Level       string           `json:"level"`
+	Logger      string           `json:"logger"`
+	Message     string           `json:"message"`
+	Logentry    *Logentry        `json:"logentry,omitempty"`
+	Environment string           `json:"environment"`
+	Release     string           `json:"release"`
+	ServerName  string           `json:"server_name"`
+	Transaction string           `json:"transaction"`
+	Fingerprint []string         `json:"fingerprint,omitempty"`
+	Tags        Tags             `json:"tags"`
+	Extra       map[string]any   `json:"extra"`
+	Request     *Request         `json:"request"`
+	Exception   *ExceptionValues `json:"exception"`
+	User        json.RawMessage  `json:"user,omitempty"`
+	Contexts    json.RawMessage  `json:"contexts,omitempty"`
+	Breadcrumbs json.RawMessage  `json:"breadcrumbs,omitempty"`
+	SDK         json.RawMessage  `json:"sdk,omitempty"`
+	Modules     json.RawMessage  `json:"modules,omitempty"`
+}
+
+// Logentry is Sentry's message-with-parameters form; stock SDKs send logger
+// messages here rather than in the bare `message` field.
+type Logentry struct {
+	Message   string          `json:"message,omitempty"`
+	Formatted string          `json:"formatted,omitempty"`
+	Params    json.RawMessage `json:"params,omitempty"`
 }
 
 type ExceptionValues struct {
@@ -73,9 +191,12 @@ type ExceptionValues struct {
 }
 
 type Request struct {
-	Method string `json:"method"`
-	URL    string `json:"url"`
-	Query  string `json:"query_string,omitempty"`
+	Method  string          `json:"method"`
+	URL     string          `json:"url"`
+	Query   string          `json:"query_string,omitempty"`
+	Headers json.RawMessage `json:"headers,omitempty"`
+	Env     json.RawMessage `json:"env,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`
 }
 
 // Ingested is what the caller gets back: which issue this landed in, and whether it
@@ -101,6 +222,29 @@ type Ingested struct {
 // only for in-app frames when there are any — an event whose in-app frames match is the
 // same bug even if the library internals below it differ between versions.
 func Fingerprint(e *Event) (fingerprint, kind, culprit, title string) {
+	fingerprint, kind, culprit, title = fingerprintDefault(e)
+
+	// An explicit fingerprint from the SDK wins. "{{ default }}" splices in the
+	// hash we computed, per Sentry's contract; ["{{ default }}"] alone is a no-op.
+	if len(e.Fingerprint) > 0 {
+		custom := false
+		h := md5.New()
+		for _, part := range e.Fingerprint {
+			if strings.TrimSpace(part) == "{{ default }}" {
+				fmt.Fprintf(h, "\x00%s", fingerprint)
+				continue
+			}
+			custom = true
+			fmt.Fprintf(h, "\x00%s", part)
+		}
+		if custom {
+			fingerprint = hex.EncodeToString(h.Sum(nil))
+		}
+	}
+	return fingerprint, kind, culprit, title
+}
+
+func fingerprintDefault(e *Event) (fingerprint, kind, culprit, title string) {
 	h := md5.New()
 
 	var exc *Exception
@@ -201,19 +345,41 @@ func New(db *store.DB) *Store { return &Store{db: db} }
 // into two issues, which the unique index on (project, fingerprint, environment)
 // prevents and ON CONFLICT resolves.
 func (s *Store) Ingest(ctx context.Context, projectID int64, e *Event) (Ingested, error) {
+	return s.IngestRaw(ctx, projectID, e, nil)
+}
+
+// IngestRaw is Ingest, but stores the SDK's own bytes as the event payload when
+// given — the envelope path uses this so nothing the SDK sent is lost to our
+// struct's field list. raw == nil falls back to re-marshaling the struct.
+func (s *Store) IngestRaw(ctx context.Context, projectID int64, e *Event, raw []byte) (Ingested, error) {
 	var out Ingested
+
+	// Stock SDKs put logger messages in logentry, not message.
+	if e.Message == "" && e.Logentry != nil {
+		e.Message = firstNonEmpty(e.Logentry.Formatted, e.Logentry.Message)
+	}
 
 	fingerprint, kind, culprit, title := Fingerprint(e)
 	env := firstNonEmpty(e.Environment, "production")
 	level := firstNonEmpty(e.Level, "error")
-	seen := time.Now()
+	now := time.Now()
+	seen := now
 	if e.Timestamp != nil && !e.Timestamp.IsZero() {
-		seen = *e.Timestamp
+		seen = e.Timestamp.Time
+		// Clamp instead of reject: a skewed clock must not hide the event, but it
+		// must not be allowed to pin last_seen into the future or the deep past.
+		if seen.After(now.Add(time.Minute)) || seen.Before(now.Add(-30*24*time.Hour)) {
+			seen = now
+		}
 	}
 
-	payload, err := json.Marshal(e)
-	if err != nil {
-		return out, fmt.Errorf("marshal event: %w", err)
+	payload := raw
+	if payload == nil {
+		var err error
+		payload, err = json.Marshal(e)
+		if err != nil {
+			return out, fmt.Errorf("marshal event: %w", err)
+		}
 	}
 
 	tx, err := s.db.Begin(ctx)

@@ -39,9 +39,13 @@ metadata:
     cert-manager.io/cluster-issuer: aies-scicom-dev
     # Beats are tiny and constant. A monitored service must never be slowed by us, and a
     # burst of crash reports from one bad deploy must not be throttled into silence.
-    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "3"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "10"
+    # The envelope path carries a numeric project id, so it needs a regex; with
+    # this on, every path below is treated as a regex (the literal ones still
+    # match themselves). /api/0/* stays unexposed except beat + errors.
+    nginx.ingress.kubernetes.io/use-regex: "true"
 spec:
   ingressClassName: nginx
   tls:
@@ -63,6 +67,16 @@ spec:
           # Error events (M2).
           - path: /api/0/errors
             pathType: Prefix
+            backend:
+              service:
+                name: bettersentryio-engine
+                port:
+                  number: 9090
+          # Sentry-compatible envelope ingest (D14): where a stock sentry-sdk
+          # DSN points. Project ids are numeric and never 0, so the control
+          # surface under /api/0/ stays unexposed.
+          - path: /api/[1-9][0-9]*/envelope
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: bettersentryio-engine

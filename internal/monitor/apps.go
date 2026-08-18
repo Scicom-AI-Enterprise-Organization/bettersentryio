@@ -9,6 +9,7 @@ import (
 // created inside an app by their first beat, so an app with zero monitors is one
 // that has been registered but has not reported yet.
 type App struct {
+	ID           int64
 	Slug         string
 	Name         string
 	Platform     string
@@ -18,14 +19,19 @@ type App struct {
 	Unhealthy    int
 	LastBeatAt   *time.Time
 	OpenIncident bool
+	OpenIssues   int
+	LastEventAt  *time.Time
 }
 
-// Connected reports whether anything has ever arrived from this app.
-func (a App) Connected() bool { return a.Monitors > 0 }
+// Connected reports whether anything has ever arrived from this app — a beat
+// (which creates a monitor) or an error event. An error-only app is reporting;
+// saying "never reported" while its crashes sit in the DB was a measured bug
+// (2026-08-18).
+func (a App) Connected() bool { return a.Monitors > 0 || a.LastEventAt != nil }
 
 func (e *Engine) Apps(ctx context.Context) ([]App, error) {
 	rows, err := e.db.Query(ctx, `
-		select p.slug, p.name, p.platform, p.created_at,
+		select p.id, p.slug, p.name, p.platform, p.created_at,
 		       coalesce((select k.public_key from ingest_keys k
 		                  where k.project_id = p.id and k.revoked_at is null
 		                  order by k.created_at limit 1), ''),
@@ -39,7 +45,10 @@ func (e *Engine) Apps(ctx context.Context) ([]App, error) {
 		         where m.project_id = p.id),
 		       exists (select 1 from monitors m
 		                 join incidents i on i.monitor_id = m.id
-		                where m.project_id = p.id and i.resolved_at is null)
+		                where m.project_id = p.id and i.resolved_at is null),
+		       (select count(*) from issues iss
+		         where iss.project_id = p.id and iss.resolved_at is null),
+		       (select max(iss.last_seen) from issues iss where iss.project_id = p.id)
 		from projects p
 		order by p.created_at`)
 	if err != nil {
@@ -50,8 +59,9 @@ func (e *Engine) Apps(ctx context.Context) ([]App, error) {
 	var out []App
 	for rows.Next() {
 		var a App
-		if err := rows.Scan(&a.Slug, &a.Name, &a.Platform, &a.CreatedAt, &a.Key,
-			&a.Monitors, &a.Unhealthy, &a.LastBeatAt, &a.OpenIncident); err != nil {
+		if err := rows.Scan(&a.ID, &a.Slug, &a.Name, &a.Platform, &a.CreatedAt, &a.Key,
+			&a.Monitors, &a.Unhealthy, &a.LastBeatAt, &a.OpenIncident,
+			&a.OpenIssues, &a.LastEventAt); err != nil {
 			return nil, err
 		}
 		out = append(out, a)

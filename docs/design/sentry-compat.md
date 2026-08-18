@@ -1,6 +1,12 @@
 # Sentry-compatible ingest: the refactor plan
 
-> Status: **approved direction** (Husein, 2026-08-18) — implementation-ready.
+> Status: **E1 + E2 SHIPPED 2026-08-18** (envelope endpoint, normalization,
+> raw-payload storage, explicit-fingerprint honor, `connected` = beats or events,
+> numeric app id in the apps API, ingress path). Acceptance: the 4-failure harness
+> on a stock sentry-sdk 2.68 DSN against a local engine → 4/4 captured, `1/0`
+> twice → one issue times_seen=2, stored event 36.6 KB with locals/context/
+> breadcrumbs/headers intact. Golden fixtures in `testdata/envelopes/`.
+> Remaining: E3 (check_in → monitors), UI error views (§5), tee transport (§6).
 > Protocol facts: [research/sentry-ingest-protocol.md](../research/sentry-ingest-protocol.md)
 > (checked against installed sentry-sdk 2.50 and re-verified against 2.68).
 > Crons mapping: [research/sentry-crons-semantics.md](../research/sentry-crons-semantics.md).
@@ -45,6 +51,15 @@ The one place our client beat sentry_sdk — a dead asyncio task with a held
 reference, missed by Sentry's default config — is covered in sentry_sdk by
 explicitly enabling `AsyncioIntegration` (it wraps the coroutine, so it fires on
 task completion, not GC). That goes into our recommended init block.
+
+**Attach caveat (measured):** `AsyncioIntegration` needs a *running* event loop
+to install its task factory, and silently no-ops without one. uvicorn imports
+the app module outside the loop, so listing it in a top-level
+`sentry_sdk.init(...)` does nothing. Attach from inside the loop instead — a
+FastAPI startup hook / lifespan calling
+`sentry_sdk.integrations.asyncio.patch_asyncio()` (or
+`enable_asyncio_integration()` on newer SDKs). Without this the harness scored
+3/4; with it, 4/4.
 
 ## 2. DSN scheme
 
