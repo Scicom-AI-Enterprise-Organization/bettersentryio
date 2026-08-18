@@ -44,7 +44,9 @@ export default async function ErrorIssuePage({
 
   const excs = ev?.exception?.values ?? [];
   const message = ev?.message || ev?.logentry?.formatted || ev?.logentry?.message || "";
-  const tags = ev?.tags ?? null;
+  // The issue's tags are the client's merged with server-derived ones; older
+  // issues predating derivation fall back to what the event payload carried.
+  const tags = issue.tags && Object.keys(issue.tags).length > 0 ? issue.tags : (ev?.tags ?? null);
   const contexts = ev?.contexts ?? null;
   const crumbs = normalizeCrumbs(ev);
 

@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -21,6 +22,9 @@ type Issue struct {
 	FirstSeen   time.Time  `json:"first_seen"`
 	LastSeen    time.Time  `json:"last_seen"`
 	ResolvedAt  *time.Time `json:"resolved_at"`
+	// Tags: the client's tags merged with server-derived ones (level,
+	// environment, release, transaction, url, mechanism, handled, ...).
+	Tags map[string]string `json:"tags"`
 	// Activity is the last 24 hours of events, one bucket per hour, oldest
 	// first — the issue list's trend sparkline. Filled by Issues(), not by the
 	// detail lookup.
@@ -35,21 +39,28 @@ type TrendBucket struct {
 
 const issueColumns = `
 	i.id, p.slug, p.name, i.fingerprint, i.environment, i.kind, i.culprit, i.title,
-	i.level, i.times_seen, i.first_seen, i.last_seen, i.resolved_at`
+	i.level, i.times_seen, i.first_seen, i.last_seen, i.resolved_at, i.tags`
 
 // Issues lists a project's issues, newest sighting first. Unresolved only unless asked,
 // because the list exists to answer "what is broken now".
-func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved bool, limit int) ([]Issue, error) {
+func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved bool, limit int, tagFilters map[string]string) ([]Issue, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.Query(ctx, `
-		select`+issueColumns+`
+	query := `
+		select` + issueColumns + `
 		from issues i
 		join projects p on p.id = i.project_id
-		where p.slug = $1 and ($2 or i.resolved_at is null)
-		order by i.last_seen desc
-		limit $3`, projectSlug, includeResolved, limit)
+		where p.slug = $1 and ($2 or i.resolved_at is null)`
+	args := []any{projectSlug, includeResolved}
+	for k, v := range tagFilters {
+		query += fmt.Sprintf(" and i.tags->>$%d = $%d", len(args)+1, len(args)+2)
+		args = append(args, k, v)
+	}
+	query += fmt.Sprintf(" order by i.last_seen desc limit $%d", len(args)+1)
+	args = append(args, limit)
+
+	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +71,7 @@ func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved 
 		var i Issue
 		if err := rows.Scan(&i.ID, &i.Project, &i.ProjectName, &i.Fingerprint, &i.Environment,
 			&i.Kind, &i.Culprit, &i.Title, &i.Level, &i.TimesSeen,
-			&i.FirstSeen, &i.LastSeen, &i.ResolvedAt); err != nil {
+			&i.FirstSeen, &i.LastSeen, &i.ResolvedAt, &i.Tags); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
@@ -161,7 +172,7 @@ func (s *Store) Issue(ctx context.Context, id int64) (Detail, bool, error) {
 		&d.Issue.ID, &d.Issue.Project, &d.Issue.ProjectName, &d.Issue.Fingerprint,
 		&d.Issue.Environment, &d.Issue.Kind, &d.Issue.Culprit, &d.Issue.Title,
 		&d.Issue.Level, &d.Issue.TimesSeen, &d.Issue.FirstSeen, &d.Issue.LastSeen,
-		&d.Issue.ResolvedAt)
+		&d.Issue.ResolvedAt, &d.Issue.Tags)
 	if err != nil {
 		return d, false, nil //nolint:nilerr // absent is not an error to the caller
 	}

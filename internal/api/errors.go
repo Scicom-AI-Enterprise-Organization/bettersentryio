@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/events"
 )
@@ -54,8 +55,8 @@ func (s *Server) handleIngestError(w http.ResponseWriter, r *http.Request) {
 	}
 	if res.IsNew {
 		s.log.Info("new issue", "issue", res.IssueID, "culprit", res.Culprit)
-		s.notifyNewIssue(r.Context(), projectID, res)
 	}
+	s.notifyIssue(r.Context(), projectID, res)
 	writeJSON(w, http.StatusAccepted, res)
 }
 
@@ -71,8 +72,15 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	includeResolved := r.URL.Query().Get("resolved") == "true"
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	// ?tag=key:value, repeatable — filters on the server-derived issue tags.
+	tagFilters := map[string]string{}
+	for _, raw := range r.URL.Query()["tag"] {
+		if k, v, ok := strings.Cut(raw, ":"); ok && k != "" {
+			tagFilters[k] = v
+		}
+	}
 
-	list, err := s.events.Issues(r.Context(), slug, includeResolved, limit)
+	list, err := s.events.Issues(r.Context(), slug, includeResolved, limit, tagFilters)
 	if err != nil {
 		s.log.Error("list issues failed", "err", err)
 		writeErr(w, http.StatusServiceUnavailable, "database unavailable")

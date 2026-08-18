@@ -207,10 +207,12 @@ type Ingested struct {
 	IsNew     bool   `json:"is_new"`
 	TimesSeen int64  `json:"times_seen"`
 	Culprit   string `json:"culprit"`
-	// For the new-issue alert, not for the SDK response.
+	// For the new-issue and regression alerts, not for the SDK response.
 	Title       string `json:"-"`
 	Level       string `json:"-"`
 	Environment string `json:"-"`
+	// Reopened: this event arrived at an issue somebody had marked resolved.
+	Reopened bool `json:"-"`
 }
 
 /* ---- grouping --------------------------------------------------------------
@@ -337,6 +339,52 @@ func parameterize(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// deriveTags merges the client's tags with what the server can read off the
+// event itself — the fields sentry.io promotes to searchable tags. Client tags
+// win on collision: the service knows better than a heuristic.
+func deriveTags(e *Event, level, env string) map[string]string {
+	out := map[string]string{
+		"level":       level,
+		"environment": env,
+	}
+	if e.Release != "" {
+		out["release"] = e.Release
+	}
+	if e.Transaction != "" {
+		out["transaction"] = e.Transaction
+	}
+	if e.ServerName != "" {
+		out["server_name"] = e.ServerName
+	}
+	if e.Logger != "" {
+		out["logger"] = e.Logger
+	}
+	if e.Request != nil && e.Request.URL != "" {
+		out["url"] = truncate(e.Request.URL, 200)
+	}
+	if e.Exception != nil && len(e.Exception.Values) > 0 {
+		last := e.Exception.Values[len(e.Exception.Values)-1]
+		if last.Mechanism != nil {
+			if last.Mechanism.Type != "" {
+				out["mechanism"] = last.Mechanism.Type
+			}
+			if last.Mechanism.Handled != nil {
+				if *last.Mechanism.Handled {
+					out["handled"] = "yes"
+				} else {
+					out["handled"] = "no"
+				}
+			}
+		}
+	}
+	for k, v := range e.Tags {
+		if k != "" && v != "" {
+			out[truncate(k, 64)] = truncate(v, 256)
+		}
+	}
+	return out
+}
+
 /* ---- ingest ---------------------------------------------------------------- */
 
 type Store struct{ db *store.DB }
@@ -386,17 +434,29 @@ func (s *Store) IngestRaw(ctx context.Context, projectID int64, e *Event, raw []
 		}
 	}
 
+	tagsJSON, err := json.Marshal(deriveTags(e, level, env))
+	if err != nil {
+		tagsJSON = []byte("{}")
+	}
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return out, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// `xmax = 0` is the standard way to learn whether an upsert inserted or updated.
+	// `xmax = 0` is the standard way to learn whether an upsert inserted or
+	// updated. The `prior` CTE reads the pre-statement row, which is how a
+	// recurrence at a RESOLVED issue is recognized as a regression.
+	var priorResolved *time.Time
 	err = tx.QueryRow(ctx, `
+		with prior as (
+			select resolved_at from issues
+			 where project_id = $1 and fingerprint = $2 and environment = $3
+		)
 		insert into issues (project_id, fingerprint, environment, kind, culprit, title,
-		                    level, times_seen, first_seen, last_seen)
-		values ($1, $2, $3, $4, $5, $6, $7, 1, $8, $8)
+		                    level, times_seen, first_seen, last_seen, tags)
+		values ($1, $2, $3, $4, $5, $6, $7, 1, $8, $8, $9::jsonb)
 		on conflict (project_id, fingerprint, environment) do update
 		   set times_seen  = issues.times_seen + 1,
 		       last_seen   = greatest(issues.last_seen, excluded.last_seen),
@@ -404,13 +464,15 @@ func (s *Store) IngestRaw(ctx context.Context, projectID int64, e *Event, raw []
 		       resolved_at = null,
 		       title       = excluded.title,
 		       culprit     = excluded.culprit,
-		       level       = excluded.level
-		returning id, times_seen, (xmax = 0)`,
-		projectID, fingerprint, env, kind, culprit, title, level, seen,
-	).Scan(&out.IssueID, &out.TimesSeen, &out.IsNew)
+		       level       = excluded.level,
+		       tags        = excluded.tags
+		returning id, times_seen, (xmax = 0), (select resolved_at from prior)`,
+		projectID, fingerprint, env, kind, culprit, title, level, seen, string(tagsJSON),
+	).Scan(&out.IssueID, &out.TimesSeen, &out.IsNew, &priorResolved)
 	if err != nil {
 		return out, fmt.Errorf("upsert issue: %w", err)
 	}
+	out.Reopened = !out.IsNew && priorResolved != nil
 
 	if err := tx.QueryRow(ctx, `
 		insert into events (issue_id, received_at, message, payload)

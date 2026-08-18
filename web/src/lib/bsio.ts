@@ -221,6 +221,8 @@ export type Issue = {
   first_seen: string;
   last_seen: string;
   resolved_at: string | null;
+  /** Client tags merged with server-derived ones (level, url, mechanism, ...). */
+  tags: Record<string, string> | null;
   /** Last 24h of events, one bucket per hour, oldest first. */
   activity: { at: string; count: number }[] | null;
 };

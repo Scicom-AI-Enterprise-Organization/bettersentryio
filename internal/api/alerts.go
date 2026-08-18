@@ -31,9 +31,13 @@ func severityFor(level string) string {
 	}
 }
 
-// notifyNewIssue announces a first-seen issue. Failures are the alerter's
+// notifyIssue announces a first-seen issue or a regression (an event arriving
+// at an issue somebody had marked resolved). Failures are the alerter's
 // problem (queued, retried, deduped) — ingest never waits on Teams.
-func (s *Server) notifyNewIssue(ctx context.Context, projectID int64, res events.Ingested) {
+func (s *Server) notifyIssue(ctx context.Context, projectID int64, res events.Ingested) {
+	if !res.IsNew && !res.Reopened {
+		return
+	}
 	slug, name, err := s.db.ProjectMeta(ctx, projectID)
 	if err != nil || slug == "" {
 		slug = fmt.Sprintf("project-%d", projectID)
@@ -45,14 +49,29 @@ func (s *Server) notifyNewIssue(ctx context.Context, projectID int64, res events
 	if s.baseURL != "" {
 		url = fmt.Sprintf("%s/apps/%s/errors/%d", s.baseURL, slug, res.IssueID)
 	}
+
+	kind, status := "issue.new", "new"
+	title := fmt.Sprintf("New issue in %s: %s", name, res.Title)
+	text := fmt.Sprintf("%s\nin %s · %s · first seen just now", res.Title, res.Culprit, res.Environment)
+	dedup := fmt.Sprintf("issue:%d:new", res.IssueID)
+	if res.Reopened {
+		// A regression is worse news than a new bug: something we called fixed
+		// is happening again. times_seen in the key makes each reopen alert once.
+		kind, status = "issue.regression", "regression"
+		title = fmt.Sprintf("Regression in %s: %s", name, res.Title)
+		text = fmt.Sprintf("%s\nin %s · %s · was resolved, happening again (seen %d× total)",
+			res.Title, res.Culprit, res.Environment, res.TimesSeen)
+		dedup = fmt.Sprintf("issue:%d:reopen:%d", res.IssueID, res.TimesSeen)
+	}
+
 	s.alerter.Notify(ctx, alert.Event{
-		Kind:        "issue.new",
+		Kind:        kind,
 		Monitor:     slug,
 		Environment: res.Environment,
-		Status:      "new",
+		Status:      status,
 		Severity:    severityFor(res.Level),
-		Title:       fmt.Sprintf("New issue in %s: %s", name, res.Title),
-		Text:        fmt.Sprintf("%s\nin %s · %s · first seen just now", res.Title, res.Culprit, res.Environment),
+		Title:       title,
+		Text:        text,
 		URL:         url,
 		Fields: map[string]string{
 			"app":         slug,
@@ -60,7 +79,7 @@ func (s *Server) notifyNewIssue(ctx context.Context, projectID int64, res events
 			"environment": res.Environment,
 			"culprit":     res.Culprit,
 		},
-		DedupKey: fmt.Sprintf("issue:%d:new", res.IssueID),
+		DedupKey: dedup,
 	})
 }
 
