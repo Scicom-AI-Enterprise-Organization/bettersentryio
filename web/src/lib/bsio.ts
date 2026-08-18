@@ -295,6 +295,51 @@ export function getTeamsAlert() {
   return get<TeamsAlert>("/api/0/alerts/teams");
 }
 
+export type Channel = {
+  id: number;
+  name: string;
+  type: string;
+  url_masked: string;
+  enabled: boolean;
+};
+
+export function listChannels() {
+  return get<{ channels: Channel[] }>("/api/0/channels");
+}
+
+async function write<T>(path: string, method: string, body?: unknown): Promise<Result<T>> {
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: { "X-BSIO-Key": KEY, "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const parsed = (await res.json().catch(() => null)) as { error?: string } | null;
+      return { ok: false, error: parsed?.error ?? `The engine returned ${res.status}.` };
+    }
+    return { ok: true, data: (await res.json()) as T };
+  } catch {
+    return { ok: false, error: "Cannot reach the bettersentryio engine." };
+  }
+}
+
+export function createChannel(name: string, type: string, url: string) {
+  return write<Channel>("/api/0/channels", "POST", { name, type, url });
+}
+
+export function updateChannel(
+  id: number,
+  patch: { name?: string; url?: string; enabled?: boolean },
+) {
+  return write<{ updated: number }>(`/api/0/channels/${id}`, "PUT", patch);
+}
+
+export function deleteChannel(id: number) {
+  return write<{ deleted: number }>(`/api/0/channels/${id}`, "DELETE");
+}
+
 /** Empty url disables the channel without forgetting it. */
 export async function setTeamsAlert(url: string): Promise<Result<TeamsAlert>> {
   try {

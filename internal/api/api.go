@@ -130,6 +130,10 @@ func (s *Server) Handler(ui interface{ Routes(*http.ServeMux) }) http.Handler {
 	// Issue alert channel settings (internal/api/alerts.go).
 	mux.HandleFunc("GET /api/0/alerts/teams", s.handleGetTeamsAlert)
 	mux.HandleFunc("PUT /api/0/alerts/teams", s.handleSetTeamsAlert)
+	mux.HandleFunc("GET /api/0/channels", s.handleListChannels)
+	mux.HandleFunc("POST /api/0/channels", s.handleCreateChannel)
+	mux.HandleFunc("PUT /api/0/channels/{id}", s.handleUpdateChannel)
+	mux.HandleFunc("DELETE /api/0/channels/{id}", s.handleDeleteChannel)
 	// Error tracking (internal/api/errors.go). Ingest takes an ingest key like a beat;
 	// reading takes a session or a key; resolving takes the operator token.
 	mux.HandleFunc("POST /api/0/errors", s.handleIngestError)

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -347,6 +348,84 @@ func (db *DB) ChannelByName(ctx context.Context, name string) (kind string, conf
 func (db *DB) SetChannelEnabled(ctx context.Context, name string, enabled bool) error {
 	_, err := db.Exec(ctx, `update channels set enabled = $2 where name = $1`, name, enabled)
 	return err
+}
+
+// ErrChannelNameTaken is returned when an alert channel name already exists.
+var ErrChannelNameTaken = errors.New("channel name already taken")
+
+// ChannelInfo is one row on the alert-channels settings page.
+type ChannelInfo struct {
+	ID      int64
+	Name    string
+	Kind    string
+	URL     string
+	Enabled bool
+}
+
+// ListChannels returns every alert channel, name order, URL pulled out of the
+// config for display.
+func (db *DB) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
+	rows, err := db.Query(ctx,
+		`select id, name, type, coalesce(config->>'url', ''), enabled from channels order by name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ChannelInfo{}
+	for rows.Next() {
+		var c ChannelInfo
+		if err := rows.Scan(&c.ID, &c.Name, &c.Kind, &c.URL, &c.Enabled); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// CreateChannel adds a named channel, enabled. Names are the identity a human
+// deletes by, so a duplicate is an error, not an upsert — EnsureChannel is the
+// boot-flag path that wants upsert semantics.
+func (db *DB) CreateChannel(ctx context.Context, name, kind, url string) (int64, error) {
+	cfg, _ := json.Marshal(map[string]string{"url": url})
+	var id int64
+	err := db.QueryRow(ctx, `
+		insert into channels (name, type, config, enabled)
+		values ($1, $2, $3::jsonb, true)
+		on conflict (name) do nothing
+		returning id`, name, kind, string(cfg)).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrChannelNameTaken
+	}
+	return id, err
+}
+
+// UpdateChannel patches a channel: nil fields keep their value. A rename onto
+// an existing name reports ErrChannelNameTaken.
+func (db *DB) UpdateChannel(ctx context.Context, id int64, name, url *string, enabled *bool) (bool, error) {
+	tag, err := db.Exec(ctx, `
+		update channels set
+			name    = coalesce($2, name),
+			config  = case when $3::text is null then config
+			               else jsonb_set(config, '{url}', to_jsonb($3::text)) end,
+			enabled = coalesce($4, enabled)
+		where id = $1`, id, name, url, enabled)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return false, ErrChannelNameTaken
+		}
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// DeleteChannel removes a channel and its delivery ledger (cascade).
+func (db *DB) DeleteChannel(ctx context.Context, id int64) (bool, error) {
+	tag, err := db.Exec(ctx, `delete from channels where id = $1`, id)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // ProjectIDForKey resolves an ingest key to its project, or 0 if unknown.
