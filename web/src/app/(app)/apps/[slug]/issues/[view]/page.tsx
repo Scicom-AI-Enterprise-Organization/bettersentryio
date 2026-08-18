@@ -3,9 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 
 import { requireUser } from "@/lib/rbac";
-import { clock, getApp, getIncidents, getIssues, monitorTone, shortDuration } from "@/lib/bsio";
-import type { Issue } from "@/lib/bsio";
-import type { StatusTone } from "@/components/ui/status-pill";
+import { clock, getApp, getIncidents, getIssues, shortDuration } from "@/lib/bsio";
 import { incidentsFor, issueView, monitorsFor } from "@/lib/issues";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -19,9 +17,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ActivityBars } from "@/components/bsio/activity-bars";
 import { ProjectHeader } from "@/components/bsio/project-tabs";
-import { Ago, ClockAt, Since } from "@/components/bsio/time";
+import { ErrorIssuesFiltered, MonitorsFiltered } from "./filtered-tables";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -85,7 +82,7 @@ export default async function ProjectIssuesPage({
       />
 
       {view.id === "outages" && app.connected && issueResult?.ok && (
-        <ErrorIssues slug={app.slug} issues={issueResult.data.issues} />
+        <ErrorIssuesFiltered slug={app.slug} issues={issueResult.data.issues} />
       )}
 
       {!app.connected ? (
@@ -114,59 +111,7 @@ export default async function ProjectIssuesPage({
           </p>
         </div>
       ) : (
-        <TableCard>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Monitor</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead>Last beat</TableHead>
-                <TableHead className="text-right">Progress</TableHead>
-                <TableHead>Activity · 1h</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {monitors.map((m) => (
-                <TableRow key={`${m.slug}:${m.environment}`}>
-                  <TableCell>
-                    <Link
-                      href={`/monitors/${encodeURIComponent(m.slug)}`}
-                      className="font-mono text-sm font-medium hover:underline"
-                    >
-                      {m.slug}
-                    </Link>
-                    <div className="text-xs text-muted-foreground">
-                      {m.environment} · expects a beat every {shortDuration(m.every_secs)}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <StatusPill tone={monitorTone(m.status)}>{m.status}</StatusPill>
-                    {m.open_incident_secs !== null && (
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        for <Since secs={m.open_incident_secs} />
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs tabular-nums">
-                    <ClockAt iso={m.last_beat_at} />
-                    <div className="text-xs text-muted-foreground">
-                      <Ago iso={m.last_beat_at} />
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm tabular-nums">
-                    {m.last_progress ?? "—"}
-                    {view.id === "breached" && (
-                      <div className="text-xs text-status-idle">frozen</div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <ActivityBars buckets={m.activity} className="h-7 w-36" />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableCard>
+        <MonitorsFiltered monitors={monitors} viewId={view.id} />
       )}
 
       {resolved.length > 0 && (
@@ -210,102 +155,5 @@ export default async function ProjectIssuesPage({
         </section>
       )}
     </div>
-  );
-}
-
-function levelTone(level: string): StatusTone {
-  switch (level) {
-    case "fatal":
-    case "error":
-      return "down";
-    case "warning":
-      return "idle";
-    default:
-      return "init";
-  }
-}
-
-/**
- * The error-tracking half of "Errors & Outages": one row per grouped issue,
- * straight from /api/0/issues. Outage incidents (missed heartbeats) render in
- * their own section below — they answer different questions.
- */
-function ErrorIssues({ slug, issues }: { slug: string; issues: Issue[] }) {
-  return (
-    <section>
-      <div className="mb-3 flex items-baseline gap-3 border-b border-border pb-2">
-        <h2 className="text-base font-medium">Errors</h2>
-        <span className="text-xs text-muted-foreground">
-          {issues.length === 0
-            ? "nothing reported"
-            : `${issues.length} open issue${issues.length === 1 ? "" : "s"}`}
-        </span>
-      </div>
-      {issues.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No error has been reported. When the SDK sends one, it groups into an issue here.
-        </p>
-      ) : (
-        <TableCard>
-          {/* table-fixed: without it a long unbroken error title stretches the
-              first column past the viewport and every other column lives in an
-              invisible horizontal scroll — "why there's no column". */}
-          <Table className="table-fixed">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Issue</TableHead>
-                <TableHead className="w-24">Level</TableHead>
-                <TableHead className="w-36">Trend · 24h</TableHead>
-                <TableHead className="w-20 text-right">Events</TableHead>
-                <TableHead className="w-24 text-right">Age</TableHead>
-                <TableHead className="w-28">Last seen</TableHead>
-                <TableHead className="w-32">Environment</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {issues.map((i) => (
-                <TableRow key={i.id}>
-                  <TableCell className="max-w-0">
-                    <Link
-                      href={`/apps/${slug}/errors/${i.id}`}
-                      title={i.title}
-                      className="block truncate text-sm font-medium hover:underline"
-                    >
-                      {i.title}
-                    </Link>
-                    <div className="truncate font-mono text-xs text-muted-foreground">{i.culprit}</div>
-                  </TableCell>
-                  <TableCell>
-                    <StatusPill tone={levelTone(i.level)}>{i.level}</StatusPill>
-                  </TableCell>
-                  <TableCell>
-                    <ActivityBars
-                      buckets={(i.activity ?? []).map((b) => ({
-                        at: b.at,
-                        beats: b.count,
-                        progress_delta: 0,
-                      }))}
-                      className="h-6 w-28"
-                    />
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm tabular-nums">
-                    {i.times_seen}×
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs tabular-nums text-muted-foreground">
-                    {shortDuration(Math.max(60, (Date.now() - Date.parse(i.first_seen)) / 1000))}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
-                    <Ago iso={i.last_seen} />
-                  </TableCell>
-                  <TableCell className="truncate font-mono text-xs text-muted-foreground">
-                    {i.environment}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableCard>
-      )}
-    </section>
   );
 }
