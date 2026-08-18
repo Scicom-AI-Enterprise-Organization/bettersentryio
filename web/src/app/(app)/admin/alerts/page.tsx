@@ -46,7 +46,10 @@ export default async function AlertsPage() {
               )}
             </div>
             <CardDescription>
-              Teams → channel → Connectors → Incoming Webhook → copy the URL here.
+              In Teams: open the chat or channel → ⋯ → Workflows → &quot;Post to a chat when a
+              webhook request is received&quot; (or the channel variant) → copy the request URL
+              here. The classic Connectors incoming webhook was retired by Microsoft in May 2026;
+              cards are sent in the Adaptive Card format the Workflows trigger expects.
               {result.data.configured && result.data.url_masked && (
                 <> Currently: <span className="font-mono">{result.data.url_masked}</span></>
               )}

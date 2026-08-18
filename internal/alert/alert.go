@@ -246,29 +246,45 @@ func payload(ch channel, ev Event) (url string, body []byte, contentType string,
 
 	case "teams":
 		url = ch.config["url"]
-		card := map[string]any{
-			"@type":      "MessageCard",
-			"@context":   "https://schema.org/extensions",
-			"themeColor": themeColor(ev.Severity),
-			"summary":    ev.Title,
-			"title":      ev.Title,
-			"text":       ev.Text,
+		// Adaptive Card in the Workflows envelope. The classic Office 365
+		// connector (webhook.office.com, MessageCard) was disabled by Microsoft
+		// in May 2026; the replacement — a Power Automate flow with the "when a
+		// Teams webhook request is received" trigger — expects
+		// {"type":"message","attachments":[<adaptive card>]} and, unlike its
+		// MessageCard compatibility mode, renders the button.
+		cardBody := []map[string]any{
+			{"type": "TextBlock", "text": ev.Title, "weight": "Bolder", "size": "Medium",
+				"wrap": true, "color": adaptiveColor(ev.Severity)},
+		}
+		if ev.Text != "" {
+			cardBody = append(cardBody, map[string]any{"type": "TextBlock", "text": ev.Text, "wrap": true})
 		}
 		if len(ev.Fields) > 0 {
 			facts := make([]map[string]string, 0, len(ev.Fields))
 			for k, v := range ev.Fields {
-				facts = append(facts, map[string]string{"name": k, "value": v})
+				facts = append(facts, map[string]string{"title": k, "value": v})
 			}
-			card["sections"] = []map[string]any{{"facts": facts}}
+			cardBody = append(cardBody, map[string]any{"type": "FactSet", "facts": facts})
+		}
+		card := map[string]any{
+			"type":    "AdaptiveCard",
+			"$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+			"version": "1.4",
+			"body":    cardBody,
+			"msteams": map[string]string{"width": "Full"},
 		}
 		if ev.URL != "" {
-			card["potentialAction"] = []map[string]any{{
-				"@type":   "OpenUri",
-				"name":    linkLabel(ev),
-				"targets": []map[string]string{{"os": "default", "uri": ev.URL}},
+			card["actions"] = []map[string]any{{
+				"type": "Action.OpenUrl", "title": linkLabel(ev), "url": ev.URL,
 			}}
 		}
-		body, err = json.Marshal(card)
+		body, err = json.Marshal(map[string]any{
+			"type": "message",
+			"attachments": []map[string]any{{
+				"contentType": "application/vnd.microsoft.card.adaptive",
+				"content":     card,
+			}},
+		})
 
 	case "telegram":
 		token, chatID := ch.config["bot_token"], ch.config["chat_id"]
@@ -298,6 +314,18 @@ func linkLabel(ev Event) string {
 		return "Open issue"
 	}
 	return "Open monitor"
+}
+
+// adaptiveColor maps severity onto Adaptive Card TextBlock colors.
+func adaptiveColor(severity string) string {
+	switch severity {
+	case SeverityOK:
+		return "Good"
+	case SeverityWarning:
+		return "Warning"
+	default:
+		return "Attention"
+	}
 }
 
 func themeColor(severity string) string {

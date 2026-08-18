@@ -14,7 +14,7 @@ export function WebhookForm({ placeholder }: { placeholder: string }) {
         <Input
           name="url"
           type="url"
-          placeholder={placeholder || "https://…webhook.office.com/webhookb2/…"}
+          placeholder={placeholder || "https://….powerplatform.com/…/workflows/…/triggers/manual/paths/invoke?…"}
           className="max-w-xl font-mono text-xs"
           autoComplete="off"
         />
