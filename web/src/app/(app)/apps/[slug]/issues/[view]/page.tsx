@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 
 import { requireUser } from "@/lib/rbac";
-import { clock, getApp, getIncidents, monitorTone, shortDuration } from "@/lib/bsio";
+import { clock, getApp, getIncidents, getIssues, monitorTone, shortDuration } from "@/lib/bsio";
+import type { Issue } from "@/lib/bsio";
+import type { StatusTone } from "@/components/ui/status-pill";
 import { incidentsFor, issueView, monitorsFor } from "@/lib/issues";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -43,7 +45,13 @@ export default async function ProjectIssuesPage({
   const view = issueView(viewId);
   if (!view) notFound();
 
-  const [appResult, incidentResult] = await Promise.all([getApp(slug), getIncidents()]);
+  const [appResult, incidentResult, issueResult] = await Promise.all([
+    getApp(slug),
+    getIncidents(),
+    // Error issues live on the "Errors & Outages" view; the other views are
+    // monitor-state lists and never show them.
+    view.id === "outages" ? getIssues(slug) : Promise.resolve(null),
+  ]);
 
   if (!appResult.ok) {
     if (appResult.error.includes("404")) notFound();
@@ -75,6 +83,10 @@ export default async function ProjectIssuesPage({
         subtitle={view.description}
         link={{ href: `/learn#${view.id}`, label: "How to instrument this" }}
       />
+
+      {view.id === "outages" && app.connected && issueResult?.ok && (
+        <ErrorIssues slug={app.slug} issues={issueResult.data.issues} />
+      )}
 
       {!app.connected ? (
         <div className="rounded-xl border border-border p-8">
@@ -198,5 +210,83 @@ export default async function ProjectIssuesPage({
         </section>
       )}
     </div>
+  );
+}
+
+function levelTone(level: string): StatusTone {
+  switch (level) {
+    case "fatal":
+    case "error":
+      return "down";
+    case "warning":
+      return "idle";
+    default:
+      return "init";
+  }
+}
+
+/**
+ * The error-tracking half of "Errors & Outages": one row per grouped issue,
+ * straight from /api/0/issues. Outage incidents (missed heartbeats) render in
+ * their own section below — they answer different questions.
+ */
+function ErrorIssues({ slug, issues }: { slug: string; issues: Issue[] }) {
+  return (
+    <section>
+      <div className="mb-3 flex items-baseline gap-3 border-b border-border pb-2">
+        <h2 className="text-base font-medium">Errors</h2>
+        <span className="text-xs text-muted-foreground">
+          {issues.length === 0
+            ? "nothing reported"
+            : `${issues.length} open issue${issues.length === 1 ? "" : "s"}`}
+        </span>
+      </div>
+      {issues.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No error has been reported. When the SDK sends one, it groups into an issue here.
+        </p>
+      ) : (
+        <TableCard>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Issue</TableHead>
+                <TableHead>Level</TableHead>
+                <TableHead className="text-right">Seen</TableHead>
+                <TableHead>Last seen</TableHead>
+                <TableHead>Environment</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {issues.map((i) => (
+                <TableRow key={i.id}>
+                  <TableCell>
+                    <Link
+                      href={`/apps/${slug}/errors/${i.id}`}
+                      className="text-sm font-medium hover:underline"
+                    >
+                      {i.title}
+                    </Link>
+                    <div className="font-mono text-xs text-muted-foreground">{i.culprit}</div>
+                  </TableCell>
+                  <TableCell>
+                    <StatusPill tone={levelTone(i.level)}>{i.level}</StatusPill>
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm tabular-nums">
+                    {i.times_seen}×
+                  </TableCell>
+                  <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
+                    <Ago iso={i.last_seen} />
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {i.environment}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableCard>
+      )}
+    </section>
   );
 }

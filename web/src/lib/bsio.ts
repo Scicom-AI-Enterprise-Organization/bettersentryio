@@ -205,6 +205,86 @@ export function getApps() {
   return get<{ apps: App[] }>("/api/0/apps");
 }
 
+/* ---- error tracking (M2/D14) ------------------------------------------------ */
+
+export type Issue = {
+  id: number;
+  project: string;
+  project_name: string;
+  fingerprint: string;
+  environment: string;
+  kind: string;
+  culprit: string;
+  title: string;
+  level: string;
+  times_seen: number;
+  first_seen: string;
+  last_seen: string;
+  resolved_at: string | null;
+};
+
+export type IssueCounts = { open: number; resolved: number };
+
+/**
+ * The stored event payload — the SDK's own bytes, verbatim. Everything is
+ * optional: events arrive from the stock sentry_sdk (envelope) and from the
+ * legacy vendored client, and the two shapes differ at the edges.
+ */
+export type EventFrame = {
+  filename?: string;
+  abs_path?: string;
+  function?: string;
+  module?: string;
+  lineno?: number;
+  in_app?: boolean;
+  context_line?: string | string[];
+  pre_context?: string[];
+  post_context?: string[];
+  vars?: Record<string, unknown>;
+};
+
+export type EventPayload = {
+  event_id?: string;
+  timestamp?: string | number;
+  level?: string;
+  logger?: string;
+  message?: string;
+  logentry?: { message?: string; formatted?: string };
+  environment?: string;
+  release?: string;
+  server_name?: string;
+  transaction?: string;
+  tags?: Record<string, string> | null;
+  extra?: Record<string, unknown> | null;
+  request?: {
+    method?: string;
+    url?: string;
+    query_string?: string;
+    headers?: Record<string, string>;
+  } | null;
+  exception?: { values?: { type?: string; value?: string; module?: string; mechanism?: { type?: string; handled?: boolean }; stacktrace?: { frames?: EventFrame[] } }[] } | null;
+  contexts?: Record<string, Record<string, unknown>> | null;
+  breadcrumbs?: { values?: { timestamp?: string | number; type?: string; category?: string; level?: string; message?: string }[] } | { timestamp?: string | number; category?: string; level?: string; message?: string }[] | null;
+  sdk?: { name?: string; version?: string } | null;
+};
+
+export type IssueDetail = {
+  issue: Issue;
+  latest_event: EventPayload;
+  recent: { id: number; received_at: string; message: string }[];
+};
+
+export function getIssues(project: string, includeResolved = false) {
+  const q = includeResolved ? "&resolved=true" : "";
+  return get<{ issues: Issue[]; counts: IssueCounts }>(
+    `/api/0/issues?project=${encodeURIComponent(project)}${q}`,
+  );
+}
+
+export function getIssue(id: number | string) {
+  return get<IssueDetail>(`/api/0/issues/${id}`);
+}
+
 export function getApp(slug: string) {
   return get<{ app: App; monitors: Monitor[] }>(`/api/0/apps/${encodeURIComponent(slug)}`);
 }
