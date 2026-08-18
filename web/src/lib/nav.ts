@@ -77,6 +77,7 @@ export const SECTIONS: NavSection[] = [
     match: ["/learn", "/profile", "/admin"],
     groups: [
       { items: [{ label: "How it works", href: "/learn" }] },
+      { label: "Alerting", items: [{ label: "Alerts", href: "/admin/alerts", admin: true }] },
       { label: "Account", items: [{ label: "Profile", href: "/profile" }] },
       {
         label: "Organization",

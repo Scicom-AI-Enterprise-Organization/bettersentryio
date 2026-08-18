@@ -19,6 +19,7 @@ const LABELS: Record<string, string> = {
   "/profile": "Profile",
   "/admin/users": "Users",
   "/admin/roles": "Roles",
+  "/admin/alerts": "Alerts",
   "/admin/organization": "Organization",
 };
 
