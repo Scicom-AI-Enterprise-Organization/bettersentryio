@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ActivityBars } from "@/components/bsio/activity-bars";
+import { SelectBox } from "@/components/bsio/select-box";
 import { Ago, ClockAt, Since } from "@/components/bsio/time";
 import { bulkArchive, bulkDelete, bulkPriority, bulkResolve, type BulkResult } from "./actions";
 
@@ -49,6 +50,7 @@ function FilterBar({
   search,
   setSearch,
   selects,
+  defaults,
 }: {
   search: string;
   setSearch: (v: string) => void;
@@ -59,7 +61,11 @@ function FilterBar({
     set: (v: string) => void;
     allLabel?: string;
   }[];
+  /** The value each select returns to when "cleared" (e.g. status -> open). */
+  defaults?: Record<string, string>;
 }) {
+  const dirty =
+    search.trim() !== "" || selects.some((s) => s.value !== (defaults?.[s.label] ?? ""));
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2">
       <div className="relative">
@@ -68,15 +74,15 @@ function FilterBar({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search…"
-          className="h-8 w-64 pl-8 text-sm"
+          className="h-9 w-64 bg-background pl-8 text-sm"
         />
       </div>
       {selects.map((s) => (
-        <select
+        <SelectBox
           key={s.label}
           value={s.value}
+          active={s.value !== (defaults?.[s.label] ?? "")}
           onChange={(e) => s.set(e.target.value)}
-          className="h-8 rounded-md border border-input bg-transparent px-2 text-sm text-foreground"
         >
           <option value="">{s.allLabel ?? `${s.label}: all`}</option>
           {s.options.map((o) => (
@@ -84,8 +90,20 @@ function FilterBar({
               {s.label}: {o}
             </option>
           ))}
-        </select>
+        </SelectBox>
       ))}
+      {dirty && (
+        <button
+          type="button"
+          onClick={() => {
+            setSearch("");
+            for (const s of selects) s.set(defaults?.[s.label] ?? "");
+          }}
+          className="text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+        >
+          Clear
+        </button>
+      )}
     </div>
   );
 }
@@ -159,6 +177,7 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
               { label: "level", value: level, options: levels, set: setLevel },
               { label: "env", value: env, options: envs, set: setEnv },
             ]}
+            defaults={{ status: "open" }}
           />
 
           {selected.size > 0 && (
@@ -175,7 +194,7 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
               >
                 Unresolve
               </Button>
-              <select
+              <SelectBox
                 disabled={pending}
                 value=""
                 onChange={(e) => {
@@ -186,7 +205,7 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
                   else if (v === "recur") act((ids) => bulkArchive(ids, "recur"));
                   else if (v === "off") act((ids) => bulkArchive(ids, "off"));
                 }}
-                className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                className="h-8"
               >
                 <option value="">Archive…</option>
                 <option value="forever">Forever</option>
@@ -194,22 +213,22 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
                 <option value="1w">For 1 week</option>
                 <option value="recur">Until it occurs again</option>
                 <option value="off">Unarchive</option>
-              </select>
-              <select
+              </SelectBox>
+              <SelectBox
                 disabled={pending}
                 value=""
                 onChange={(e) => {
                   const v = e.target.value;
                   if (v) act((ids) => bulkPriority(ids, v === "none" ? "" : v));
                 }}
-                className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                className="h-8"
               >
                 <option value="">Set priority…</option>
                 <option value="high">High</option>
                 <option value="med">Med</option>
                 <option value="low">Low</option>
                 <option value="none">Clear</option>
-              </select>
+              </SelectBox>
               <Button
                 size="sm"
                 variant="ghost"

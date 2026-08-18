@@ -6,6 +6,7 @@ import { Pencil, Plus, Trash2, X } from "lucide-react";
 import type { Channel } from "@/lib/bsio";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SelectBox } from "@/components/bsio/select-box";
 import { StatusPill } from "@/components/ui/status-pill";
 import {
   Table,
@@ -157,15 +158,11 @@ function AddForm() {
       <p className="mb-3 text-sm font-medium">Add a webhook</p>
       <form action={action} className="flex flex-wrap items-center gap-2">
         <Input name="name" placeholder="name, e.g. sre-team-chat" className="w-52 text-sm" required />
-        <select
-          name="type"
-          defaultValue="teams"
-          className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
-        >
+        <SelectBox name="type" defaultValue="teams">
           <option value="teams">Teams</option>
           <option value="slack">Slack</option>
           <option value="webhook">Generic webhook</option>
-        </select>
+        </SelectBox>
         <Input
           name="url"
           type="url"

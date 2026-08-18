@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
+import { SelectBox } from "@/components/bsio/select-box";
 import { actArchive, actDelete, actPriority, actResolve, type ActResult } from "./actions";
 
 export function IssueActions({
@@ -34,9 +35,10 @@ export function IssueActions({
       <Button size="sm" disabled={pending} onClick={() => run(() => actResolve(id, !resolved))}>
         {resolved ? "Unresolve" : "Resolve"}
       </Button>
-      <select
+      <SelectBox
         disabled={pending}
         value=""
+        active={archived}
         onChange={(e) => {
           const v = e.target.value;
           if (v === "forever") run(() => actArchive(id, "forever"));
@@ -45,7 +47,7 @@ export function IssueActions({
           else if (v === "recur") run(() => actArchive(id, "recur"));
           else if (v === "off") run(() => actArchive(id, "off"));
         }}
-        className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+        className="h-8"
       >
         <option value="">{archived ? "Archived…" : "Archive…"}</option>
         {!archived && <option value="forever">Forever</option>}
@@ -53,18 +55,19 @@ export function IssueActions({
         {!archived && <option value="1w">For 1 week</option>}
         {!archived && <option value="recur">Until it occurs again</option>}
         {archived && <option value="off">Unarchive</option>}
-      </select>
-      <select
+      </SelectBox>
+      <SelectBox
         disabled={pending}
         value={priority}
+        active={priority !== ""}
         onChange={(e) => run(() => actPriority(id, e.target.value))}
-        className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+        className="h-8"
       >
         <option value="">priority: none</option>
         <option value="high">priority: high</option>
         <option value="med">priority: med</option>
         <option value="low">priority: low</option>
-      </select>
+      </SelectBox>
       <Button
         size="sm"
         variant="ghost"
