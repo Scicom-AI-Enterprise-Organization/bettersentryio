@@ -186,6 +186,7 @@ export function uptimeLabel(pct: number): string {
 /* ---- apps ------------------------------------------------------------------ */
 
 export type App = {
+  id: number;
   slug: string;
   name: string;
   platform: string;
@@ -195,6 +196,8 @@ export type App = {
   unhealthy: number;
   last_beat_at: string | null;
   open_incident: boolean;
+  open_issues: number;
+  last_event_at: string | null;
   connected: boolean;
 };
 

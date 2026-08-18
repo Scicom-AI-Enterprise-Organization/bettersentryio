@@ -20,6 +20,73 @@ export function ingestBase(): string {
   return process.env.BSIO_PUBLIC_URL ?? process.env.BSIO_API_URL ?? "http://localhost:9090";
 }
 
+/**
+ * The app's Sentry-compatible DSN (D14): the stock sentry_sdk pointed at this
+ * URL reports here instead of sentry.io. Same key as beats, numeric project id
+ * in the path — exactly Sentry's own DSN shape, different host.
+ */
+export function dsnFor(app: { id: number; ingest_key: string }): string {
+  const base = new URL(ingestBase());
+  const port = base.port ? `:${base.port}` : "";
+  return `${base.protocol}//${app.ingest_key}@${base.hostname}${port}/${app.id}`;
+}
+
+/**
+ * Error tracking is the official sentry_sdk with our DSN — nothing of ours to
+ * install or import (D14, docs/design/sentry-compat.md). The snippet mirrors
+ * Sentry's own FastAPI onboarding, plus the one measured caveat: capturing a
+ * dying background task needs AsyncioIntegration attached from INSIDE the
+ * running loop, because uvicorn imports the module outside it.
+ */
+export function errorTracking(app: { id: number; ingest_key: string }): Step {
+  const dsn = dsnFor(app);
+  return {
+    title: "Report errors — the official sentry_sdk",
+    body:
+      "Errors use the stock sentry_sdk, not our client: point its DSN here and every " +
+      "unhandled exception, logger.error and its full context (locals, source lines, " +
+      "breadcrumbs, request) lands in this project. Same init you would write for " +
+      "sentry.io — only the DSN differs.",
+    blocks: [
+      {
+        filename: "terminal",
+        language: "bash",
+        code: "pip install sentry-sdk",
+      },
+      {
+        filename: "main.py",
+        language: "python",
+        code: `import sentry_sdk
+
+sentry_sdk.init(
+    dsn="${dsn}",
+    environment="production",
+    traces_sample_rate=0,   # errors only; transactions are dropped server-side
+    send_default_pii=True,
+)
+
+from fastapi import FastAPI
+
+app = FastAPI()
+
+
+# Optional but measured-necessary for background tasks: a task that dies with
+# its reference held is captured only if AsyncioIntegration attaches to the
+# RUNNING loop — uvicorn imports this module outside it, so attach on startup.
+@app.on_event("startup")
+async def _sentry_asyncio():
+    from sentry_sdk.integrations.asyncio import patch_asyncio
+    patch_asyncio()
+
+
+@app.get("/sentry-debug")
+async def trigger_error():
+    return 1 / 0  # shows up as one grouped issue; run it twice -> count=2`,
+      },
+    ],
+  };
+}
+
 const SDK_INSTALL: Step = {
   title: "Install",
   body: "One stdlib-only file, served by the engine you report to. There is nothing to pip install, and no version to keep in sync.",

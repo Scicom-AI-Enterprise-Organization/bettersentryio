@@ -5,7 +5,7 @@ import { ArrowLeft, Check } from "lucide-react";
 import { requireUser } from "@/lib/rbac";
 import { getApp } from "@/lib/bsio";
 import { platform as findPlatform } from "@/lib/platforms";
-import { ingestBase, integration, type Block } from "@/lib/snippets";
+import { dsnFor, errorTracking, ingestBase, integration, type Block } from "@/lib/snippets";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { AppWatcher } from "@/components/bsio/app-watcher";
@@ -44,9 +44,12 @@ export default async function AppPage({
   const { app } = result.data;
   const plat = findPlatform(app.platform);
   const guide = integration(app, plat?.id ?? "python", { progress: progress !== "0" });
+  const errors = errorTracking(app);
 
-  // Install counts as done once anything has reported: the client is clearly in place.
-  const installDone = app.connected;
+  // Each half ticks off from its own evidence: an error event proves the DSN
+  // works; a monitor proves a beat arrived. `connected` is either.
+  const errorsDone = app.last_event_at !== null;
+  const beatsDone = app.monitors > 0;
 
   return (
     <div className="max-w-5xl space-y-8">
@@ -72,34 +75,54 @@ export default async function AppPage({
           <Check className="h-4 w-4 text-status-active" />
           <AlertTitle>App created</AlertTitle>
           <AlertDescription>
-            Paste the snippet below into {app.name}. Monitors register themselves on the first
-            heartbeat — there is nothing else to configure here.
+            Point sentry_sdk at the DSN below for errors, and paste the heartbeat snippet into
+            {" "}{app.name}&apos;s loop. Everything registers itself on first contact — there is
+            nothing else to configure here.
           </AlertDescription>
         </Alert>
       )}
 
       {/* ---- credentials -------------------------------------------------- */}
       <section className="grid gap-4 sm:grid-cols-2">
-        <CopyField label="Engine URL" value={ingestBase()} />
+        <div className="sm:col-span-2">
+          <CopyField label="DSN (errors — paste into sentry_sdk.init)" value={dsnFor(app)} />
+        </div>
+        <CopyField label="Engine URL (heartbeats)" value={ingestBase()} />
         <CopyField label="Ingest key" value={app.ingest_key} />
       </section>
       <p className="-mt-4 text-xs text-muted-foreground">
-        The key identifies {app.name} and nothing else. Treat it as a credential — a secret or
-        an env var, not your repo. It can report heartbeats; it cannot create or delete apps.
+        One key, two protocols: inside the DSN it lets the stock sentry_sdk report errors;
+        as <span className="font-mono">BSIO_KEY</span> it reports heartbeats. Treat it as a
+        credential — a secret or an env var, not your repo. It cannot create or delete apps.
       </p>
 
-      {/* ---- the three steps ---------------------------------------------- */}
+      {/* ---- the steps ------------------------------------------------------ */}
       <div className="space-y-8">
+        <Step
+          n={1}
+          title={errors.title}
+          done={errorsDone}
+          body={errors.body}
+          action={
+            <CopyButton
+              label="Copy instructions"
+              value={errors.blocks.map((b) => b.code).join("\n\n")}
+            />
+          }
+        >
+          <Blocks blocks={errors.blocks} />
+        </Step>
+
         {guide.install && (
-          <Step n={1} title={guide.install.title} done={installDone} body={guide.install.body}>
+          <Step n={2} title={`${guide.install.title} the heartbeat client`} done={beatsDone} body={guide.install.body}>
             <Blocks blocks={guide.install.blocks} />
           </Step>
         )}
 
         <Step
-          n={guide.install ? 2 : 1}
-          title={guide.configure.title}
-          done={app.connected}
+          n={guide.install ? 3 : 2}
+          title="Heartbeats — the loop that must not stop"
+          done={beatsDone}
           body={guide.configure.body}
           action={
             <CopyButton
@@ -121,7 +144,7 @@ export default async function AppPage({
         </Step>
 
         <Step
-          n={guide.install ? 3 : 2}
+          n={guide.install ? 4 : 3}
           title="Verify"
           done={app.connected}
           body="Live from the engine, rechecked every 3 seconds. Nothing here needs a refresh."
