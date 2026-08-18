@@ -135,7 +135,18 @@ protocol, and worth sequencing right after E1/E2 because the payloads become ric
 - Errors tab per app: issue list (title, culprit, level, times_seen, last_seen,
   environment).
 - Issue detail: stacktrace with context lines + locals, breadcrumbs, tags chips,
-  request block — everything the sentry_sdk payload now carries.
+  request block — everything the sentry_sdk payload now carries. **Render custom
+  contexts and linkify URL values**: the wan service attaches a `grafana` context
+  (dashboard / Loki logs by correlation_id / Tempo trace) that Sentry shows as
+  clickable links — the same context already arrives and is stored here (round-2
+  audit, 2026-08-18); only the rendering is missing. Adopt that
+  `set_context("grafana", ...)` + `correlation_id` tag pattern in the standard
+  init block.
+- Server-side tag derivation at ingest (round-2 finding): sentry.io promotes
+  level/environment/release/transaction/server_name/url/mechanism/handled and
+  parses the user agent into ~14 searchable tags from the same bytes; we store
+  them in the payload but index only client-set tags. Derive at ingest, index
+  (jsonb + GIN), expose in search.
 - Alert on first-seen issue: wire `is_new` (the ingest already computes it) into the
   existing alerter + delivery-retry ledger.
 
