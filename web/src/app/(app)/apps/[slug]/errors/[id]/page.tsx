@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { requireUser } from "@/lib/rbac";
-import { getApp, getIssue, getIssueEvent, issueStatus } from "@/lib/bsio";
+import { getApp, getEventAttachments, getIssue, getIssueEvent, issueStatus } from "@/lib/bsio";
 import type { EventFrame, EventPayload } from "@/lib/bsio";
 import { IssueActions } from "./issue-actions";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -69,6 +69,11 @@ export default async function ErrorIssuePage({
   const tags = issue.tags && Object.keys(issue.tags).length > 0 ? issue.tags : (ev?.tags ?? null);
   const contexts = ev?.contexts ?? null;
   const crumbs = normalizeCrumbs(ev);
+  const threads = (ev?.threads?.values ?? []).filter((t) => t.stacktrace?.frames?.length);
+  const attachmentsResult = ev?.event_id
+    ? await getEventAttachments(slug, String(ev.event_id))
+    : null;
+  const attachments = attachmentsResult?.ok ? attachmentsResult.data.attachments : [];
 
   return (
     <div className="max-w-5xl space-y-6">
@@ -192,6 +197,7 @@ export default async function ErrorIssuePage({
             </span>
           )}
           {ev.release && <span className="text-muted-foreground">📦 {ev.release}</span>}
+          {ev.dist && <span className="text-muted-foreground">dist {ev.dist}</span>}
           {ev.environment && <span className="text-muted-foreground">{ev.environment}</span>}
         </section>
       )}
@@ -243,6 +249,54 @@ export default async function ErrorIssuePage({
           <Frames frames={ex.stacktrace?.frames ?? []} />
         </SectionCard>
       ))}
+
+      {/* ---- threads: attach_stacktrace and crash-time thread dumps ----------- */}
+      {threads.length > 0 && (
+        <SectionCard title={`Threads (${threads.length})`}>
+          <div className="space-y-4">
+            {threads.map((t, i) => (
+              <div key={i}>
+                <p className="mb-2 font-mono text-[13px]">
+                  <span className="font-semibold">{t.name || `thread ${t.id ?? i}`}</span>
+                  {t.crashed && (
+                    <span className="ml-2 rounded bg-status-down/10 px-1.5 py-0.5 text-[11px] font-medium text-status-down">
+                      crashed
+                    </span>
+                  )}
+                  {t.current && !t.crashed && (
+                    <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                      current
+                    </span>
+                  )}
+                  {t.state && <span className="ml-2 text-muted-foreground">{t.state}</span>}
+                </p>
+                <Frames frames={t.stacktrace?.frames ?? []} />
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+
+      {/* ---- attachments -------------------------------------------------------- */}
+      {attachments.length > 0 && (
+        <SectionCard title={`Attachments (${attachments.length})`}>
+          <div className="space-y-1.5">
+            {attachments.map((a) => (
+              <div key={a.id} className="flex flex-wrap items-baseline gap-x-4 font-mono text-[13px] leading-6">
+                <a
+                  href={`/apps/${slug}/errors/${issue.id}/attachments/${a.id}`}
+                  className="min-w-0 break-all text-primary hover:underline"
+                  download={a.filename}
+                >
+                  {a.filename}
+                </a>
+                <span className="text-muted-foreground">{a.content_type}</span>
+                <span className="tabular-nums text-muted-foreground">{prettySize(a.size)}</span>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
 
       {/* ---- request ---------------------------------------------------------- */}
       {ev?.request?.url && (
@@ -413,6 +467,12 @@ function KVRows({ rows }: { rows: [string, string][] }) {
       ))}
     </div>
   );
+}
+
+function prettySize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function contextLine(f: EventFrame): string {

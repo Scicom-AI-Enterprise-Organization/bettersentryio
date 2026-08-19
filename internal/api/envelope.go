@@ -40,6 +40,10 @@ const (
 	// a megabyte means something is wrong.
 	maxEnvelopeBytes      = 20 << 20
 	maxEnvelopeEventBytes = 1 << 20
+	// Attachments live in Postgres, so per-item and per-envelope caps keep one
+	// chatty SDK from turning the events database into a blob store.
+	maxAttachmentBytes        = 1 << 20
+	maxAttachmentsPerEnvelope = 5
 )
 
 // sentryKey extracts the DSN public key the SDK presented: the X-Sentry-Auth
@@ -58,10 +62,13 @@ func sentryKey(r *http.Request) string {
 	return r.URL.Query().Get("sentry_key")
 }
 
-// envelopeItem is one item of a Sentry envelope: a type, and its payload bytes.
+// envelopeItem is one item of a Sentry envelope: a type, its payload bytes, and
+// the two header fields only attachments carry.
 type envelopeItem struct {
-	Type    string
-	Payload []byte
+	Type        string
+	Payload     []byte
+	Filename    string
+	ContentType string
 }
 
 // parseEnvelope splits Sentry's newline framing: one envelope-header line, then
@@ -85,8 +92,10 @@ func parseEnvelope(body []byte) (header json.RawMessage, items []envelopeItem, e
 			continue // tolerate blank lines between items
 		}
 		var ih struct {
-			Type   string `json:"type"`
-			Length *int64 `json:"length"`
+			Type        string `json:"type"`
+			Length      *int64 `json:"length"`
+			Filename    string `json:"filename"`
+			ContentType string `json:"content_type"`
 		}
 		if err := json.Unmarshal(hdrLine, &ih); err != nil {
 			return nil, nil, errors.New("item header is not JSON")
@@ -106,7 +115,10 @@ func parseEnvelope(body []byte) (header json.RawMessage, items []envelopeItem, e
 		} else {
 			payload, rest, _ = bytes.Cut(rest, []byte{'\n'})
 		}
-		items = append(items, envelopeItem{Type: ih.Type, Payload: payload})
+		items = append(items, envelopeItem{
+			Type: ih.Type, Payload: payload,
+			Filename: ih.Filename, ContentType: ih.ContentType,
+		})
 	}
 	return header, items, nil
 }
@@ -246,11 +258,78 @@ func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request) {
 
 	dropped := map[string]int{}
 	responseID := envHeader.EventID
+	attachmentsSaved := 0
 	for _, item := range items {
-		if item.Type != "event" {
-			// check_in routing is E3 (docs/design/sentry-compat.md); everything
-			// else is a product we do not carry. Counted, never errored — a new
-			// SDK item type must never break error delivery.
+		// Non-event items each map to what they actually are: sessions to
+		// release health, check-ins to the beat pipeline, attachments to
+		// storage, client reports to the log. Whatever remains (transactions,
+		// spans, profiles — APM products we do not carry) is counted and
+		// dropped: a new SDK item type must never break error delivery.
+		switch item.Type {
+		case "event":
+			// handled below
+
+		case "session":
+			if c := events.ParseSessionItem(item.Payload, time.Now()); c != nil {
+				if err := s.events.RecordSessions(r.Context(), projectID, *c); err != nil {
+					s.log.Error("session record failed", "err", err)
+				}
+			}
+			continue
+
+		case "sessions":
+			for _, c := range events.ParseSessionsItem(item.Payload, time.Now()) {
+				if err := s.events.RecordSessions(r.Context(), projectID, c); err != nil {
+					s.log.Error("session record failed", "err", err)
+					break
+				}
+			}
+			continue
+
+		case "check_in":
+			s.handleCheckInItem(r.Context(), projectID, item.Payload)
+			continue
+
+		case "attachment":
+			switch {
+			case envHeader.EventID == "":
+				dropped["attachment:no_event"]++
+			case len(item.Payload) > maxAttachmentBytes:
+				dropped["attachment:too_large"]++
+			case attachmentsSaved >= maxAttachmentsPerEnvelope:
+				dropped["attachment:too_many"]++
+			default:
+				name := item.Filename
+				if name == "" {
+					name = "attachment"
+				}
+				if err := s.events.SaveAttachment(r.Context(), projectID,
+					envHeader.EventID, name, item.ContentType, item.Payload); err != nil {
+					s.log.Error("attachment save failed", "err", err)
+				} else {
+					attachmentsSaved++
+				}
+			}
+			continue
+
+		case "client_report":
+			var cr struct {
+				Discarded []struct {
+					Reason   string `json:"reason"`
+					Category string `json:"category"`
+					Quantity int64  `json:"quantity"`
+				} `json:"discarded_events"`
+			}
+			if json.Unmarshal(item.Payload, &cr) == nil {
+				for _, d := range cr.Discarded {
+					s.log.Info("sdk discarded events client-side",
+						"project", projectID, "reason", d.Reason,
+						"category", d.Category, "n", d.Quantity)
+				}
+			}
+			continue
+
+		default:
 			dropped[item.Type]++
 			continue
 		}

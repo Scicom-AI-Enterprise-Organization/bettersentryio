@@ -97,6 +97,7 @@ export function projectNav(slug: string): NavItem[] {
     { label: "Errors & Outages", href: `/apps/${slug}/issues/outages` },
     { label: "Breached Metrics", href: `/apps/${slug}/issues/breached` },
     { label: "Warnings", href: `/apps/${slug}/issues/warnings` },
+    { label: "Releases", href: `/apps/${slug}/releases` },
     { label: "Setup", href: `/apps/${slug}/setup` },
   ];
 }

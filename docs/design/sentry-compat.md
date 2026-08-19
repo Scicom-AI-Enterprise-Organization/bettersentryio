@@ -6,7 +6,13 @@
 > on a stock sentry-sdk 2.68 DSN against a local engine → 4/4 captured, `1/0`
 > twice → one issue times_seen=2, stored event 36.6 KB with locals/context/
 > breadcrumbs/headers intact. Golden fixtures in `testdata/envelopes/`.
-> Remaining: E3 (check_in → monitors), UI error views (§5), tee transport (§6).
+> Remaining: tee transport (§6). UI error views (§5) shipped v0.1.6–v0.1.21.
+> SDK-coverage round (v0.1.23): E3 shipped — `check_in` ok→beat (schedule from
+> monitor_config, crontab estimated, else adaptive gap), error→issue via
+> fingerprint ["cron", slug]; `session`/`sessions` → hourly release_health +
+> Releases view (crash-free); `attachment` → Postgres (1 MB/item, 5/envelope) +
+> event-page download; `client_report` → logged. Threads + dist now render.
+> Transactions/spans/profiles stay dropped: APM is a non-goal.
 > Protocol facts: [research/sentry-ingest-protocol.md](../research/sentry-ingest-protocol.md)
 > (checked against installed sentry-sdk 2.50 and re-verified against 2.68).
 > Crons mapping: [research/sentry-crons-semantics.md](../research/sentry-crons-semantics.md).

@@ -276,7 +276,60 @@ export type EventPayload = {
   sdk?: { name?: string; version?: string } | null;
   user?: Record<string, unknown> | null;
   modules?: Record<string, string> | null;
+  dist?: string;
+  threads?: {
+    values?: {
+      id?: number | string;
+      name?: string;
+      crashed?: boolean;
+      current?: boolean;
+      main?: boolean;
+      state?: string;
+      stacktrace?: { frames?: EventFrame[] } | null;
+    }[];
+  } | null;
 };
+
+export type ReleaseRow = {
+  release: string;
+  environment: string;
+  sessions: number;
+  exited: number;
+  errored: number;
+  crashed: number;
+  abnormal: number;
+  crash_free: number;
+  first_seen: string;
+  last_seen: string;
+};
+
+export type EventAttachment = {
+  id: number;
+  filename: string;
+  content_type: string;
+  size: number;
+  received_at: string;
+};
+
+export function getReleases(project: string, days = 30) {
+  return get<{ releases: ReleaseRow[]; days: number }>(
+    `/api/0/releases?project=${encodeURIComponent(project)}&days=${days}`,
+  );
+}
+
+export function getEventAttachments(project: string, eventUuid: string) {
+  return get<{ attachments: EventAttachment[] }>(
+    `/api/0/events/${encodeURIComponent(eventUuid)}/attachments?project=${encodeURIComponent(project)}`,
+  );
+}
+
+/** The engine bytes for one attachment — the download proxy streams this. */
+export async function fetchAttachment(id: number): Promise<Response> {
+  return fetch(`${BASE}/api/0/attachments/${id}`, {
+    headers: { "X-BSIO-Key": KEY },
+    cache: "no-store",
+  });
+}
 
 export type IssueDetail = {
   issue: Issue;
