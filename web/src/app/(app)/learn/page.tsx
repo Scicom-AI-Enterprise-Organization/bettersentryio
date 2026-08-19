@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Gauge, Siren } from "lucide-react";
+import { AlertTriangle, ArrowRight, Bug, Gauge, Siren } from "lucide-react";
 
 import { requireUser } from "@/lib/rbac";
 import { getApps } from "@/lib/bsio";
@@ -28,21 +28,95 @@ export default async function LearnPage() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">How it works</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          Every uptime checker asks your service <em>are you there?</em> from the outside. That
-          question was answered <span className="font-medium text-foreground">yes</span> for two
-          days while our TTS API produced nothing, because the HTTP server was fine and the
-          batching loop was dead. bettersentryio asks a different question, from the inside:{" "}
-          <em>is the loop still doing work?</em>
+          Production breaks in two ways. The loud way: an exception is raised somewhere — that is{" "}
+          <span className="font-medium text-foreground">error tracking</span>, and you get it by
+          pointing the official <Code>sentry_sdk</Code> at this platform, same init as sentry.io.
+          And the quiet way: nothing is raised at all. Every uptime checker asks your service{" "}
+          <em>are you there?</em> from the outside, and that question was answered{" "}
+          <span className="font-medium text-foreground">yes</span> for two days while our TTS API
+          produced nothing — the HTTP server was fine and the batching loop was dead. For that,
+          bettersentryio asks a different question, from the inside: <em>is the loop still doing
+          work?</em>
         </p>
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-          The three views under Issues are not three things to set up. They are three
-          consequences of the arguments you pass to one function.
+          Two instruments, one page. Errors are one <Code>sentry_sdk.init()</Code>. The monitor
+          views are three consequences of the arguments you pass to one beat call.
         </p>
       </header>
 
+      {/* ---- errors: the sentry_sdk half ----------------------------------- */}
+      <section id="errors" className="scroll-mt-6 space-y-3">
+        <div className="flex items-center gap-2">
+          <Bug className="h-4 w-4 text-status-down" />
+          <h2 className="text-lg font-semibold tracking-tight">
+            Errors — the official sentry_sdk
+          </h2>
+        </div>
+        <p className="text-sm font-medium">
+          Exceptions are reported by the stock sentry_sdk. Nothing of ours to install or import —
+          only the DSN differs from sentry.io.
+        </p>
+        <div className="space-y-3 text-sm leading-relaxed text-muted-foreground">
+          <CodeBlock
+            filename="main.py"
+            language="python"
+            code={`import sentry_sdk
+
+sentry_sdk.init(
+    dsn="https://<ingest key>@bsio-ingest.aies.scicom.dev/<project id>",
+    environment="production",
+    traces_sample_rate=0,   # errors only; transactions are dropped server-side
+    send_default_pii=True,
+)`}
+          />
+          <p>
+            Your project&apos;s real DSN is on its{" "}
+            <span className="font-medium text-foreground">Setup</span> page, ready to copy. From
+            that one init, everything the SDK captures lands here: every unhandled exception,
+            every <Code>logger.error(...)</Code>, and anything you pass to{" "}
+            <Code>capture_exception</Code> or <Code>capture_message</Code> at any of the five
+            levels — with locals, source lines, breadcrumbs and request data intact.
+          </p>
+          <p>
+            The engine groups events into issues by stack fingerprint, keeps issues separate per
+            environment, and sends a Teams card for every{" "}
+            <span className="font-medium text-foreground">new issue</span> and every{" "}
+            <span className="font-medium text-foreground">regression</span> — an issue you
+            resolved that starts happening again. Triage lives in Errors &amp; Outages: resolve,
+            archive, prioritise, or walk the stored events one by one.
+          </p>
+          <CodeBlock
+            filename="prove it once"
+            language="python"
+            code={`@app.get("/sentry-debug")
+async def trigger_error():
+    return 1 / 0   # shows up as a grouped issue within seconds`}
+          />
+          <Advice title="Background tasks under uvicorn">
+            <Code>AsyncioIntegration</Code> silently does nothing unless it is attached from
+            inside the running event loop — uvicorn imports your module outside it. Call{" "}
+            <Code>patch_asyncio()</Code> from a startup hook, or a dying background task is an
+            error you never see. The Setup page snippet includes this.
+          </Advice>
+          <Advice title="Errors only, by design">
+            Keep <Code>traces_sample_rate=0</Code>. Performance transactions, sessions and
+            profiles are accepted and dropped server-side so the SDK never breaks — but they buy
+            you nothing here. This platform is the error half of Sentry plus the loop monitoring
+            Sentry does not have.
+          </Advice>
+        </div>
+      </section>
+
       {/* ---- the one call ------------------------------------------------- */}
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold tracking-tight">One call, three detections</h2>
+        <h2 className="text-lg font-semibold tracking-tight">
+          Loops — one beat call, three detections
+        </h2>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          The second instrument. An exception can only be reported if one is raised — a dead or
+          frozen loop raises nothing, so no error tracker will ever see it. Beats catch what
+          sentry_sdk cannot.
+        </p>
         <CodeBlock
           filename="the whole API"
           language="python"
@@ -71,8 +145,10 @@ export default async function LearnPage() {
                     Errors &amp; Outages
                   </span>
                 </td>
-                <td className="px-4 py-2.5 text-muted-foreground">The beats stopped.</td>
-                <td className="px-4 py-2.5 font-mono text-xs">every + grace</td>
+                <td className="px-4 py-2.5 text-muted-foreground">
+                  An exception arrived, or the beats stopped.
+                </td>
+                <td className="px-4 py-2.5 font-mono text-xs">sentry_sdk · every + grace</td>
               </tr>
               <tr>
                 <td className="whitespace-nowrap px-4 py-2.5">
@@ -110,8 +186,13 @@ export default async function LearnPage() {
         id="outages"
         icon={<Siren className="h-4 w-4 text-status-down" />}
         title="Errors & Outages"
-        lede="Heartbeats stopped arriving. The loop crashed, was cancelled, deadlocked, or the whole process is gone."
+        lede="Two feeds share this view: error issues reported by sentry_sdk, and outages detected when heartbeats stop arriving."
       >
+        <p>
+          The errors half needs no configuration beyond the <Code>sentry_sdk.init()</Code> above —
+          grouped issues appear here with their full triage workflow. The outages half is the
+          beat deadline:
+        </p>
         <p>
           Each beat records when the next one is due: <Code>last_beat + every + grace</Code>. A
           sweep runs every few seconds looking for monitors past that deadline. Nothing in your
