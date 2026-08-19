@@ -4,7 +4,10 @@ import { authConfig } from "@/lib/auth.config";
 
 const { auth } = NextAuth(authConfig);
 
-const PUBLIC_PATHS = ["/", "/login", "/forbidden", "/showcase"];
+// /invite must be public: an invitee has no session yet by definition —
+// without it every invite link bounced to /login, where the only possible
+// outcome was CredentialsSignin (measured: 1 invitation, 0 accepted).
+const PUBLIC_PATHS = ["/", "/login", "/forbidden", "/showcase", "/invite"];
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
