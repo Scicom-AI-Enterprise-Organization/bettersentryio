@@ -89,18 +89,18 @@ export default async function ErrorIssuePage({
       )}
 
       {/* ---- issue facts ---------------------------------------------------- */}
-      <section className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+      <section className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[15px]">
         <StatusPill tone={levelTone(issue.level)}>{issue.level}</StatusPill>
         <span className="font-mono tabular-nums">{issue.times_seen}× seen</span>
         <span className="text-muted-foreground">
           first <Ago iso={issue.first_seen} /> · last <Ago iso={issue.last_seen} />
         </span>
-        <span className="font-mono text-xs text-muted-foreground">{issue.environment}</span>
+        <span className="font-mono text-[13px] text-muted-foreground">{issue.environment}</span>
         {ev?.release && (
-          <span className="font-mono text-xs text-muted-foreground">release {ev.release}</span>
+          <span className="font-mono text-[13px] text-muted-foreground">release {ev.release}</span>
         )}
         {ev?.server_name && (
-          <span className="font-mono text-xs text-muted-foreground">{ev.server_name}</span>
+          <span className="font-mono text-[13px] text-muted-foreground">{ev.server_name}</span>
         )}
         {status === "resolved" && <StatusPill tone="active">resolved</StatusPill>}
         {status === "archived" && (
@@ -121,7 +121,7 @@ export default async function ErrorIssuePage({
 
       {/* ---- event navigation -------------------------------------------------- */}
       {recent.length > 1 && (
-        <section className="flex flex-wrap items-center gap-3 text-sm">
+        <section className="flex flex-wrap items-center gap-3 text-[15px]">
           {newer ? (
             <Link
               className="text-primary hover:underline"
@@ -132,7 +132,7 @@ export default async function ErrorIssuePage({
           ) : (
             <span className="text-muted-foreground">← newer</span>
           )}
-          <span className="font-mono text-xs text-muted-foreground">
+          <span className="font-mono text-[13px] text-muted-foreground">
             event {currentIdx + 1} of {recent.length} recent
             {recent[currentIdx] && <> · <ClockAt iso={recent[currentIdx].received_at} /></>}
           </span>
@@ -149,27 +149,28 @@ export default async function ErrorIssuePage({
         </section>
       )}
 
-      {/* ---- tags ----------------------------------------------------------- */}
+      {/* ---- tags: Sentry-style key/value pills ------------------------------- */}
       {tags && Object.keys(tags).length > 0 && (
         <SectionCard title="Tags">
-          <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
-            <KVRows
-              rows={Object.entries(tags)
-                .sort()
-                .filter((_, n) => n % 2 === 0)}
-            />
-            <KVRows
-              rows={Object.entries(tags)
-                .sort()
-                .filter((_, n) => n % 2 === 1)}
-            />
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(tags)
+              .sort()
+              .map(([k, v]) => (
+                <span
+                  key={k}
+                  className="inline-flex max-w-full items-stretch overflow-hidden rounded-full border border-border font-mono text-[13px] leading-6"
+                >
+                  <span className="bg-muted/60 px-3 py-0.5 text-muted-foreground">{k}</span>
+                  <span className="min-w-0 truncate border-l border-border px-3 py-0.5">{v}</span>
+                </span>
+              ))}
           </div>
         </SectionCard>
       )}
 
       {/* ---- event header: identity + quick chips + raw JSON ------------------- */}
       {ev && (
-        <section className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border pb-3 font-mono text-xs">
+        <section className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border pb-3 font-mono text-[13px]">
           {ev.event_id && <span className="font-semibold">ID: {String(ev.event_id).slice(0, 8)}</span>}
           {recent[currentIdx] && (
             <span className="text-muted-foreground"><Ago iso={recent[currentIdx].received_at} /></span>
@@ -219,9 +220,9 @@ export default async function ErrorIssuePage({
       {/* ---- message-only events --------------------------------------------- */}
       {message && (
         <SectionCard title="Message">
-          <p className="whitespace-pre-wrap font-mono text-sm">{message}</p>
+          <p className="whitespace-pre-wrap font-mono text-[15px] leading-relaxed">{message}</p>
           {ev?.logger && (
-            <p className="mt-2 text-xs text-muted-foreground">logger {ev.logger}</p>
+            <p className="mt-2 text-[13px] text-muted-foreground">logger {ev.logger}</p>
           )}
         </SectionCard>
       )}
@@ -232,9 +233,9 @@ export default async function ErrorIssuePage({
           key={i}
           title={`${ex.type ?? "Error"}${excs.length > 1 ? (i === 0 ? " — raised" : " — caused by") : ""}`}
         >
-          {ex.value && <p className="mb-3 font-mono text-sm">{ex.value}</p>}
+          {ex.value && <p className="mb-3 font-mono text-[15px] leading-relaxed">{ex.value}</p>}
           {ex.mechanism?.type && (
-            <p className="mb-3 text-xs text-muted-foreground">
+            <p className="mb-3 text-[13px] text-muted-foreground">
               mechanism {ex.mechanism.type} ·{" "}
               {ex.mechanism.handled === false ? "unhandled" : "handled"}
             </p>
@@ -246,13 +247,13 @@ export default async function ErrorIssuePage({
       {/* ---- request ---------------------------------------------------------- */}
       {ev?.request?.url && (
         <SectionCard title="Request">
-          <p className="font-mono text-sm">
+          <p className="font-mono text-[15px]">
             {ev.request.method} {ev.request.url}
             {ev.request.query_string ? `?${ev.request.query_string}` : ""}
           </p>
           {ev.request.headers && (
             <>
-              <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Headers</p>
+              <p className="mt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Headers</p>
               <KVRows
                 rows={Object.entries(ev.request.headers).map(([k, v]) => [k, String(v)])}
               />
@@ -260,7 +261,7 @@ export default async function ErrorIssuePage({
           )}
           {(ev.request as { env?: Record<string, unknown> }).env && (
             <>
-              <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Environment</p>
+              <p className="mt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Environment</p>
               <KVRows
                 rows={Object.entries((ev.request as { env?: Record<string, unknown> }).env ?? {}).map(
                   ([k, v]) => [k, String(v)],
@@ -296,11 +297,11 @@ export default async function ErrorIssuePage({
       {/* ---- breadcrumbs -------------------------------------------------------- */}
       {crumbs.length > 0 && (
         <SectionCard title={`Breadcrumbs — last ${crumbs.length} before the event`}>
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             {crumbs.map((c, i) => (
-              <div key={i} className="flex gap-3 font-mono text-xs">
-                <span className="w-24 shrink-0 text-muted-foreground">{c.category ?? "log"}</span>
-                <span className="w-14 shrink-0 text-muted-foreground">{c.level ?? ""}</span>
+              <div key={i} className="flex gap-3 font-mono text-[13px] leading-6">
+                <span className="w-28 shrink-0 text-muted-foreground">{c.category ?? "log"}</span>
+                <span className="w-16 shrink-0 text-muted-foreground">{c.level ?? ""}</span>
                 <span className="min-w-0 break-all">{c.message ?? ""}</span>
               </div>
             ))}
@@ -311,14 +312,14 @@ export default async function ErrorIssuePage({
       {/* ---- recent events ------------------------------------------------------ */}
       {recent.length > 1 && (
         <SectionCard title="Recent events in this issue">
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {recent.map((r) => (
               <Link
                 key={r.id}
                 href={`/apps/${slug}/errors/${issue.id}?event=${r.id}`}
-                className="flex gap-3 font-mono text-xs hover:bg-muted/40"
+                className="flex gap-3 rounded-md px-2 py-1 font-mono text-[13px] leading-6 hover:bg-muted/40"
               >
-                <span className="w-40 shrink-0 tabular-nums text-muted-foreground">
+                <span className="w-44 shrink-0 tabular-nums text-muted-foreground">
                   <ClockAt iso={r.received_at} />
                 </span>
                 <span className="min-w-0 break-all">{r.message}</span>
@@ -343,14 +344,14 @@ export default async function ErrorIssuePage({
       {/* ---- packages, collapsed: useful for "which venv was this" ------------- */}
       {ev?.modules && Object.keys(ev.modules).length > 0 && (
         <details className="rounded-xl border border-border p-5">
-          <summary className="cursor-pointer text-sm font-semibold tracking-tight">
+          <summary className="cursor-pointer text-base font-semibold tracking-tight">
             Packages ({Object.keys(ev.modules).length})
           </summary>
-          <div className="mt-3 grid gap-x-8 gap-y-1 sm:grid-cols-3">
+          <div className="mt-4 grid gap-x-8 gap-y-1.5 sm:grid-cols-3">
             {Object.entries(ev.modules)
               .sort()
               .map(([k, v]) => (
-                <div key={k} className="flex gap-3 font-mono text-xs">
+                <div key={k} className="flex gap-3 font-mono text-[13px]">
                   <span className="min-w-0 flex-1 truncate text-muted-foreground">{k}</span>
                   <span className="tabular-nums">{v}</span>
                 </div>
@@ -360,7 +361,7 @@ export default async function ErrorIssuePage({
       )}
 
       {ev?.sdk?.name && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-[13px] text-muted-foreground">
           reported by {ev.sdk.name} {ev.sdk.version}
         </p>
       )}
@@ -383,29 +384,30 @@ function levelTone(level: string): StatusTone {
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-xl border border-border p-5">
-      <h2 className="mb-3 text-sm font-semibold tracking-tight">{title}</h2>
+      <h2 className="mb-4 text-base font-semibold tracking-tight">{title}</h2>
       {children}
     </section>
   );
 }
 
+/** Sentry's key/value treatment: sans muted key column, mono value. */
 function KVRows({ rows }: { rows: [string, string][] }) {
   return (
-    <div className="mt-2 space-y-1">
+    <div className="mt-2 space-y-1.5">
       {rows.map(([k, v]) => (
-        <div key={k} className="flex gap-3 font-mono text-xs">
-          <span className="w-40 shrink-0 text-muted-foreground">{k}</span>
+        <div key={k} className="flex gap-4 text-[13px] leading-6">
+          <span className="w-44 shrink-0 text-muted-foreground">{k}</span>
           {/^https?:\/\//.test(v) ? (
             <a
               href={v}
               target="_blank"
               rel="noreferrer"
-              className="min-w-0 break-all text-primary hover:underline"
+              className="min-w-0 break-all font-mono text-primary hover:underline"
             >
               {v}
             </a>
           ) : (
-            <span className="min-w-0 break-all">{v}</span>
+            <span className="min-w-0 break-all font-mono">{v}</span>
           )}
         </div>
       ))}
@@ -425,7 +427,7 @@ function contextLine(f: EventFrame): string {
  * to one line — present, but out of the way.
  */
 function Frames({ frames }: { frames: EventFrame[] }) {
-  if (frames.length === 0) return <p className="text-xs text-muted-foreground">no stacktrace</p>;
+  if (frames.length === 0) return <p className="text-[13px] text-muted-foreground">no stacktrace</p>;
   const ordered = [...frames].reverse();
   return (
     <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
@@ -433,50 +435,63 @@ function Frames({ frames }: { frames: EventFrame[] }) {
         const line = contextLine(f);
         const hasBody =
           !!line || (f.pre_context?.length ?? 0) > 0 || !!f.vars;
+        // Sentry's frame header: file path in accent, "in <function>" with the
+        // function emphasized, line number trailing.
         const label = (
-          <span className="min-w-0 break-all font-mono text-xs">
-            <span className={f.in_app ? "font-semibold" : "text-muted-foreground"}>
+          <span className="min-w-0 break-all font-mono text-[13px] leading-6">
+            <span className={f.in_app ? "font-medium text-primary" : "text-muted-foreground"}>
               {f.filename ?? f.module ?? "?"}
             </span>
-            <span className="text-muted-foreground">
-              :{f.lineno ?? "?"} in {f.function ?? "?"}
+            <span className="text-muted-foreground"> in </span>
+            <span className={f.in_app ? "font-semibold" : "text-muted-foreground"}>
+              {f.function ?? "?"}
             </span>
+            <span className="text-muted-foreground"> at line {f.lineno ?? "?"}</span>
             {f.in_app && (
-              <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-                in app
+              <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                In App
               </span>
             )}
           </span>
         );
-        if (!hasBody) return <div key={i} className="px-3 py-1.5">{label}</div>;
+        if (!hasBody) return <div key={i} className="px-4 py-2">{label}</div>;
         return (
           <details key={i} open={f.in_app}>
-            <summary className="cursor-pointer list-none px-3 py-1.5 hover:bg-muted/40">
+            <summary className="cursor-pointer list-none px-4 py-2 hover:bg-muted/40">
               {label}
             </summary>
-            <div className="space-y-2 border-t border-border bg-muted/30 px-3 py-2">
+            <div className="space-y-3 border-t border-border bg-muted/30 px-4 py-3">
               {(f.pre_context?.length || line) && (
-                <pre className="overflow-x-auto font-mono text-xs leading-5">
+                <pre className="overflow-x-auto font-mono text-[13px] leading-6">
                   {(f.pre_context ?? []).map((l, n) => (
                     <div key={`pre${n}`} className="text-muted-foreground">
-                      {(f.lineno ?? 0) - (f.pre_context?.length ?? 0) + n}  {l}
+                      <span className="mr-4 inline-block w-10 select-none text-right opacity-60">
+                        {(f.lineno ?? 0) - (f.pre_context?.length ?? 0) + n}
+                      </span>
+                      {l}
                     </div>
                   ))}
                   {line && (
-                    <div className="bg-status-down/10 font-semibold">
-                      {f.lineno ?? "?"}  {line}
+                    <div className="rounded-sm bg-status-down/10 font-semibold">
+                      <span className="mr-4 inline-block w-10 select-none text-right">
+                        {f.lineno ?? "?"}
+                      </span>
+                      {line}
                     </div>
                   )}
                   {(f.post_context ?? []).map((l, n) => (
                     <div key={`post${n}`} className="text-muted-foreground">
-                      {(f.lineno ?? 0) + 1 + n}  {l}
+                      <span className="mr-4 inline-block w-10 select-none text-right opacity-60">
+                        {(f.lineno ?? 0) + 1 + n}
+                      </span>
+                      {l}
                     </div>
                   ))}
                 </pre>
               )}
               {f.vars && Object.keys(f.vars).length > 0 && (
                 <div>
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Local variables
                   </p>
                   <KVRows

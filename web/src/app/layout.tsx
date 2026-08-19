@@ -1,20 +1,22 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Roboto_Mono, Rubik } from "next/font/google";
 import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "sonner";
 import { BrandProvider } from "@/components/brand-provider";
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-inter",
+// Sentry's own pairing: Rubik for UI text, Roboto Mono for code and values.
+const rubik = Rubik({
+  variable: "--font-rubik",
   subsets: ["latin"],
   display: "swap",
 });
 
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-jetbrains-mono",
+const robotoMono = Roboto_Mono({
+  variable: "--font-roboto-mono",
   subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -28,7 +30,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
+        className={`${rubik.variable} ${robotoMono.variable} font-sans antialiased`}
       >
         <ThemeProvider
           attribute="class"

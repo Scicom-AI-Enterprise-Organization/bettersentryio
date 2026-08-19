@@ -52,10 +52,12 @@ export function ProjectHeader({
         {actions}
       </div>
 
-      <div className="border-b border-border pb-2">
-        <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+      <div className="border-b border-border pb-3">
+        <h2 className="text-xl font-medium leading-snug tracking-tight" style={{ textWrap: "balance" }}>
+          {title}
+        </h2>
         {subtitle && (
-          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+          <p className="mt-1 max-w-3xl text-[15px] text-muted-foreground">
             {subtitle}
             {link && (
               <>
