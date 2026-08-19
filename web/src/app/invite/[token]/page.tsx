@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Button } from "@/components/ui/button";
+import { InviteSignupForm } from "./signup-form";
 
 export default async function InvitePage({
   params,
@@ -25,7 +25,19 @@ export default async function InvitePage({
   }
 
   if (!session?.user?.id) {
-    redirect(`/login?callbackUrl=${encodeURIComponent(`/invite/${token}`)}`);
+    // No session is the NORMAL case: the invitee does not have an account yet
+    // — this page is where it gets created. The old redirect-to-login was a
+    // dead end under credentials auth (nothing to sign in AS).
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center px-4 text-center">
+        <h1 className="text-3xl font-bold tracking-tight">You&apos;re invited</h1>
+        <p className="mt-3 max-w-md text-muted-foreground">
+          Create your bettersentryio account to accept this invitation
+          {invite.role ? ` (role: ${invite.role.name})` : ""}.
+        </p>
+        <InviteSignupForm token={token} email={invite.email} roleName={invite.role?.name ?? null} />
+      </div>
+    );
   }
 
   if (invite.email && invite.email.toLowerCase() !== session.user.email?.toLowerCase()) {
