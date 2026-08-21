@@ -163,9 +163,9 @@ export default async function ErrorIssuePage({
               .map(([k, v]) => (
                 <span
                   key={k}
-                  className="inline-flex max-w-full items-stretch overflow-hidden rounded-full border border-border font-mono text-[13px] leading-6"
+                  className="inline-flex max-w-full items-stretch overflow-hidden rounded-full border border-border bg-card font-mono text-[13px] leading-6"
                 >
-                  <span className="bg-muted/60 px-3 py-0.5 text-muted-foreground">{k}</span>
+                  <span className="bg-background px-3 py-0.5 text-muted-foreground">{k}</span>
                   <span className="min-w-0 truncate border-l border-border px-3 py-0.5">{v}</span>
                 </span>
               ))}
@@ -397,7 +397,7 @@ export default async function ErrorIssuePage({
 
       {/* ---- packages, collapsed: useful for "which venv was this" ------------- */}
       {ev?.modules && Object.keys(ev.modules).length > 0 && (
-        <details className="rounded-xl border border-border p-5">
+        <details className="rounded-xl border border-border bg-card p-5 shadow-xs">
           <summary className="cursor-pointer text-base font-semibold tracking-tight">
             Packages ({Object.keys(ev.modules).length})
           </summary>
@@ -437,7 +437,7 @@ function levelTone(level: string): StatusTone {
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-xl border border-border p-5">
+    <section className="rounded-xl border border-border bg-card p-5 shadow-xs">
       <h2 className="mb-4 text-base font-semibold tracking-tight">{title}</h2>
       {children}
     </section>
@@ -520,7 +520,7 @@ function Frames({ frames }: { frames: EventFrame[] }) {
             <summary className="cursor-pointer list-none px-4 py-2 hover:bg-muted/40">
               {label}
             </summary>
-            <div className="space-y-3 border-t border-border bg-muted/30 px-4 py-3">
+            <div className="space-y-3 border-t border-border bg-background/60 px-4 py-3">
               {(f.pre_context?.length || line) && (
                 <pre className="overflow-x-auto font-mono text-[13px] leading-6">
                   {(f.pre_context ?? []).map((l, n) => (

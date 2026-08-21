@@ -86,7 +86,7 @@ export default async function ProjectIssuesPage({
       )}
 
       {!app.connected ? (
-        <div className="rounded-xl border border-border p-8">
+        <div className="rounded-xl border border-border bg-card p-8 shadow-xs">
           <h2 className="text-lg font-semibold tracking-tight">{app.name} has never reported</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
             The project exists and has a key, but no heartbeat has arrived yet — so nothing is

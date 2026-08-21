@@ -19,7 +19,7 @@ export function SelectBox({
     <select
       data-slot="select"
       className={cn(
-        "h-9 cursor-pointer rounded-md border bg-background py-1 pl-3 pr-2 text-sm shadow-xs transition-[color,box-shadow,border-color] outline-none",
+        "h-9 cursor-pointer rounded-md border bg-card py-1 pl-3 pr-2 text-sm shadow-xs transition-[color,box-shadow,border-color] outline-none",
         "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
         "disabled:pointer-events-none disabled:opacity-50",
         active
