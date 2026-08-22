@@ -1,11 +1,16 @@
 import {
   Activity,
   AlertTriangle,
+  BellRing,
   BookOpen,
   Boxes,
+  Bug,
   Building2,
+  ChartColumn,
   Gauge,
+  KeyRound,
   Plug,
+  Rocket,
   Settings,
   ShieldCheck,
   Siren,
@@ -34,7 +39,7 @@ export type NavGroup = {
 };
 
 export type NavSection = {
-  id: "projects" | "monitors" | "settings";
+  id: "projects" | "monitors" | "settings" | "learn";
   label: string;
   icon: React.ElementType;
   /** Where the rail entry goes. */
@@ -73,11 +78,18 @@ export const SECTIONS: NavSection[] = [
     id: "settings",
     label: "Settings",
     icon: Settings,
-    href: "/learn",
-    match: ["/learn", "/profile", "/admin"],
+    // Alerts is what people come to Settings to change; "How it works" is a manual you
+    // read once, so it sits last and no longer owns the section's landing page.
+    href: "/admin/alerts",
+    match: ["/profile", "/admin"],
     groups: [
-      { items: [{ label: "How it works", href: "/learn" }] },
-      { label: "Alerting", items: [{ label: "Alerts", href: "/admin/alerts", admin: true }] },
+      {
+        label: "Alerting",
+        items: [
+          { label: "Alerts", href: "/admin/alerts", admin: true },
+          { label: "API tokens", href: "/admin/tokens", admin: true },
+        ],
+      },
       { label: "Account", items: [{ label: "Profile", href: "/profile" }] },
       {
         label: "Organization",
@@ -85,6 +97,27 @@ export const SECTIONS: NavSection[] = [
           { label: "Users", href: "/admin/users", admin: true },
           { label: "Roles", href: "/admin/roles", admin: true },
           { label: "Organization", href: "/admin/organization", admin: true },
+        ],
+      },
+    ],
+  },
+  {
+    // The guide is a destination of its own, not a setting: it earns a rail entry so
+    // it is one click from anywhere, and its panel is the guide's own table of
+    // contents rather than a single redundant link.
+    id: "learn",
+    label: "How it works",
+    icon: BookOpen,
+    href: "/learn",
+    match: ["/learn"],
+    groups: [
+      {
+        items: [
+          { label: "Overview", href: "/learn" },
+          { label: "Errors", href: "/learn#errors" },
+          { label: "Errors & Outages", href: "/learn#outages" },
+          { label: "Breached Metrics", href: "/learn#breached" },
+          { label: "Warnings", href: "/learn#warnings" },
         ],
       },
     ],
@@ -97,7 +130,10 @@ export function projectNav(slug: string): NavItem[] {
     { label: "Errors & Outages", href: `/apps/${slug}/issues/outages` },
     { label: "Breached Metrics", href: `/apps/${slug}/issues/breached` },
     { label: "Warnings", href: `/apps/${slug}/issues/warnings` },
+    { label: "Analytics", href: `/apps/${slug}/analytics` },
     { label: "Releases", href: `/apps/${slug}/releases` },
+    // Alerts and Setup are the project's configuration, so they close the list.
+    { label: "Alerts", href: `/apps/${slug}/alerts` },
     { label: "Setup", href: `/apps/${slug}/setup` },
   ];
 }
@@ -106,11 +142,20 @@ export const ITEM_ICONS: Record<string, React.ElementType> = {
   outages: Siren,
   breached: Gauge,
   warnings: AlertTriangle,
+  analytics: ChartColumn,
+  releases: Rocket,
+  alerts: BellRing,
   setup: Plug,
   "/monitors": Activity,
   "/incidents": Siren,
+  "/admin/alerts": BellRing,
   "/learn": BookOpen,
+  "/learn#errors": Bug,
+  "/learn#outages": Siren,
+  "/learn#breached": Gauge,
+  "/learn#warnings": AlertTriangle,
   "/profile": UserCog,
+  "/admin/tokens": KeyRound,
   "/admin/users": Users,
   "/admin/roles": ShieldCheck,
   "/admin/organization": Building2,

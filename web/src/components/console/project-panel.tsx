@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronsLeft } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { projectInPath, projectNav, viewIcon } from "@/lib/nav";
+import { PROJECT_PANEL_COOKIE, rememberPanel } from "@/lib/panel-state";
 import { IconLink, IconRail, type PanelProject } from "./nav-panel";
 
 /**
@@ -16,10 +17,21 @@ import { IconLink, IconRail, type PanelProject } from "./nav-panel";
  * one project's issues and switch to another in a single click. It only exists while a
  * project is selected — an empty third column would be furniture.
  */
-export function ProjectPanel({ projects = [] }: { projects?: PanelProject[] }) {
+export function ProjectPanel({
+  projects = [],
+  initialCollapsed = false,
+}: {
+  projects?: PanelProject[];
+  /** From the cookie, resolved on the server — see @/lib/panel-state. */
+  initialCollapsed?: boolean;
+}) {
   const pathname = usePathname();
   const slug = projectInPath(pathname);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
+  const collapse = useCallback((next: boolean) => {
+    setCollapsed(next);
+    rememberPanel(PROJECT_PANEL_COOKIE, next);
+  }, []);
 
   if (!slug) return null;
 
@@ -30,7 +42,7 @@ export function ProjectPanel({ projects = [] }: { projects?: PanelProject[] }) {
     return (
       <IconRail
         label={`Expand ${project?.name ?? slug}`}
-        onExpand={() => setCollapsed(false)}
+        onExpand={() => collapse(false)}
       >
         {projectNav(slug).map((item) => {
           const Icon = viewIcon(item.href);
@@ -62,7 +74,7 @@ export function ProjectPanel({ projects = [] }: { projects?: PanelProject[] }) {
         </div>
         <button
           type="button"
-          onClick={() => setCollapsed(true)}
+          onClick={() => collapse(true)}
           aria-label="Collapse project"
           className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         >

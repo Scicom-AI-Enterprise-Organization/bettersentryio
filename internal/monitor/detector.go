@@ -289,7 +289,7 @@ func (d *Detector) SetAlertRetry(v time.Duration) { d.alertRetry = v }
 // steps, so dying in between costs nothing either.
 func (d *Detector) alertOpenIncidents(ctx context.Context) (int, error) {
 	rows, err := d.db.Query(ctx, `
-		select i.id, i.kind, i.opened_at, m.slug, i.environment,
+		select i.id, i.kind, i.opened_at, m.slug, m.project_id, i.environment,
 		       ms.last_beat_at, ms.last_progress, ms.window_started_at,
 		       coalesce((m.config->>'expected_every_secs')::bigint, 60),
 		       coalesce((m.config->>'stall_window_secs')::bigint, 0)
@@ -305,6 +305,11 @@ func (d *Detector) alertOpenIncidents(ctx context.Context) (int, error) {
 		  and exists (
 		        select 1 from channels c
 		        where c.enabled
+		          -- Only channels this monitor's project actually routes to: an
+		          -- unroutable incident must stop retrying, not retry forever.
+		          and (c.project_id = m.project_id or exists (
+		                select 1 from project_channels pc
+		                where pc.channel_id = c.id and pc.project_id = m.project_id))
 		          and not exists (
 		                select 1 from notifications n
 		                where n.dedup_key = 'incident:' || i.id || ':open'
@@ -319,6 +324,7 @@ func (d *Detector) alertOpenIncidents(ctx context.Context) (int, error) {
 		kind                string
 		openedAt            time.Time
 		slug, env           string
+		projectID           int64
 		lastBeat            *time.Time
 		lastProgress        *int64
 		windowStart         *time.Time
@@ -327,7 +333,7 @@ func (d *Detector) alertOpenIncidents(ctx context.Context) (int, error) {
 	var pending []inc
 	for rows.Next() {
 		var i inc
-		if err := rows.Scan(&i.id, &i.kind, &i.openedAt, &i.slug, &i.env,
+		if err := rows.Scan(&i.id, &i.kind, &i.openedAt, &i.slug, &i.projectID, &i.env,
 			&i.lastBeat, &i.lastProgress, &i.windowStart, &i.everySecs, &i.stallSec); err != nil {
 			rows.Close()
 			return 0, err
@@ -345,6 +351,7 @@ func (d *Detector) alertOpenIncidents(ctx context.Context) (int, error) {
 			Severity:    alert.SeverityCritical,
 			Monitor:     i.slug,
 			Environment: i.env,
+			ProjectID:   i.projectID,
 			URL:         monitorURL(d.baseURL, i.slug),
 			Fields:      map[string]string{},
 		}

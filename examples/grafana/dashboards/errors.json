@@ -1,0 +1,322 @@
+{
+  "uid": "bettersentryio-errors",
+  "title": "bettersentryio \u2014 errors",
+  "tags": [
+    "bettersentryio"
+  ],
+  "timezone": "browser",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "editable": true,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Events per interval, by level",
+      "type": "timeseries",
+      "datasource": {
+        "type": "grafana-sentry-datasource",
+        "uid": "bettersentryio"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 16,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-sentry-datasource",
+            "uid": "bettersentryio"
+          },
+          "queryType": "eventsStats",
+          "eventsStatsQuery": "",
+          "eventsStatsYAxis": [
+            "count()"
+          ],
+          "eventsStatsGroups": [
+            "level"
+          ],
+          "eventsStatsLimit": 5,
+          "projectIds": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineWidth": 0,
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "warning"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "interval": "6h",
+      "maxDataPoints": 200
+    },
+    {
+      "id": 2,
+      "title": "Events accepted",
+      "type": "stat",
+      "datasource": {
+        "type": "grafana-sentry-datasource",
+        "uid": "bettersentryio"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-sentry-datasource",
+            "uid": "bettersentryio"
+          },
+          "queryType": "statsV2",
+          "statsCategory": [
+            "error"
+          ],
+          "statsFields": [
+            "sum(quantity)"
+          ],
+          "statsGroupBy": [
+            "outcome"
+          ],
+          "statsInterval": "1d",
+          "projectIds": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "area"
+      },
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "Timestamp",
+                "Sum (Quantity)"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Unresolved issues, most frequent first",
+      "type": "table",
+      "datasource": {
+        "type": "grafana-sentry-datasource",
+        "uid": "bettersentryio"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-sentry-datasource",
+            "uid": "bettersentryio"
+          },
+          "queryType": "issues",
+          "issuesQuery": "is:unresolved",
+          "issuesSort": "freq",
+          "issuesLimit": 50,
+          "projectIds": []
+        }
+      ],
+      "transformations": [
+        {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "destinationType": "number",
+                "targetField": "Count"
+              }
+            ]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "UserCount": true,
+              "Substatus": true,
+              "Type": true,
+              "Platform": true,
+              "IsPublic": true,
+              "IsBookmarked": true,
+              "IsSubscribed": true,
+              "HasSeen": true,
+              "NumComments": true,
+              "Metadata.filename": true,
+              "Metadata.function": true,
+              "AssignedTo.email": true,
+              "AssignedTo.type": true,
+              "AssignedTo.id": true,
+              "AssignedTo.name": true,
+              "SubscriptionDetails.reason": true,
+              "Project.id": true,
+              "Project.platform": true,
+              "Culprit": false,
+              "FirstSeenInRange": true,
+              "LastSeenInRange": true,
+              "Lifetime.count": true,
+              "Lifetime.userCount": true,
+              "Lifetime.firstSeen": true,
+              "Lifetime.lastSeen": true,
+              "Metadata.value": true,
+              "IsUnhandled": true,
+              "Permalink": true,
+              "Project.name": true
+            },
+            "indexByName": {
+              "ShortID": 0,
+              "Level": 1,
+              "Title": 2,
+              "Culprit": 3,
+              "Count": 4,
+              "Project.slug": 5,
+              "LastSeen": 6,
+              "FirstSeen": 7,
+              "Status": 8,
+              "ID": 9,
+              "Metadata.type": 10
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Count"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Title"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 460
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Count"
+          }
+        ],
+        "showHeader": true
+      }
+    }
+  ]
+}

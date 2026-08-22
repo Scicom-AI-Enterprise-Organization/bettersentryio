@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/bsio/confirm-dialog";
 import { SelectBox } from "@/components/bsio/select-box";
 import { actArchive, actDelete, actPriority, actResolve, type ActResult } from "./actions";
 
@@ -22,6 +23,7 @@ export function IssueActions({
 }) {
   const router = useRouter();
   const [notice, setNotice] = useState<ActResult | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const run = (fn: () => Promise<ActResult>) =>
@@ -73,10 +75,7 @@ export function IssueActions({
         variant="ghost"
         className="text-status-down hover:text-status-down"
         disabled={pending}
-        onClick={() => {
-          if (!window.confirm("Delete this issue and all its events? This cannot be undone.")) return;
-          run(() => actDelete(id, slug));
-        }}
+        onClick={() => setConfirming(true)}
       >
         Delete
       </Button>
@@ -86,6 +85,19 @@ export function IssueActions({
           {notice.message}
         </span>
       )}
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Delete this issue?"
+        description="Every stored event goes with it, stacktraces and attachments included. Resolving or archiving keeps the history; this does not."
+        confirmLabel="Delete"
+        destructive
+        pending={pending}
+        onConfirm={() => {
+          setConfirming(false);
+          run(() => actDelete(id, slug));
+        }}
+      />
     </div>
   );
 }

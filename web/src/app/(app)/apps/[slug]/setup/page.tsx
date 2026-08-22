@@ -1,13 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Check } from "lucide-react";
+import { Check } from "lucide-react";
 
 import { requireUser } from "@/lib/rbac";
 import { getApp } from "@/lib/bsio";
 import { platform as findPlatform } from "@/lib/platforms";
 import { dsnFor, errorTracking, ingestBase, integration, type Block } from "@/lib/snippets";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { AppWatcher } from "@/components/bsio/app-watcher";
 import { CodeBlock, CopyField } from "@/components/bsio/code-block";
 import { CopyButton } from "@/components/bsio/copy-button";
@@ -52,22 +51,14 @@ export default async function AppPage({
   const beatsDone = app.monitors > 0;
 
   return (
-    <div className="max-w-5xl space-y-8">
+    // Full width: the DSN, the snippets and the verification output are all things
+    // you copy or read across, and a 5xl cap wrapped them for no reason.
+    <div className="space-y-8">
       <ProjectHeader
         app={app}
         title={plat ? `Configure the ${plat.name} integration` : "Configure this app"}
         subtitle="Three steps, already filled in with this project's key. Steps tick themselves off from real state, not from clicks."
-        actions={
-          <div className="flex items-center gap-1">
-            <Button asChild variant="outline" size="sm">
-              <Link href="/apps/new">
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Platform selection
-              </Link>
-            </Button>
-            <DeleteAppDialog slug={app.slug} name={app.name} monitors={app.monitors} />
-          </div>
-        }
+        actions={<DeleteAppDialog slug={app.slug} name={app.name} monitors={app.monitors} />}
       />
 
       {created === "1" && !app.connected && (
@@ -152,20 +143,6 @@ export default async function AppPage({
           <AppWatcher app={app.slug} initialConnected={app.connected} />
         </Step>
       </div>
-
-      {app.connected && (
-        <div className="flex flex-wrap gap-2 border-t border-border pt-6">
-          <Button asChild size="sm">
-            <Link href={`/apps/${app.slug}/issues/outages`}>Take me to Issues</Link>
-          </Button>
-          <Button asChild variant="outline" size="sm">
-            <Link href="/monitors">View monitors</Link>
-          </Button>
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/learn">How it works</Link>
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
@@ -217,7 +194,7 @@ function Step({
         {action}
       </div>
       <div className="space-y-3 pl-[34px]">
-        {body && <p className="max-w-3xl text-sm text-muted-foreground">{body}</p>}
+        {body && <p className="text-sm text-muted-foreground">{body}</p>}
         {children}
       </div>
     </section>

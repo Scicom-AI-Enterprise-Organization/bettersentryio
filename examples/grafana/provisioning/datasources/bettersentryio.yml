@@ -1,0 +1,20 @@
+# The engine is a single-tenant install with no orgs, so the slug is fixed and any slug
+# in a request path is accepted.
+#
+# authToken should be a token from Settings → API tokens (`bsiot_…`): read-only, named,
+# and revocable on its own. The operator token and an app's ingest key are also accepted
+# by the read surface, but the first can delete apps and the second exists for writing
+# events — neither is the right thing to leave in a dashboard.
+apiVersion: 1
+
+datasources:
+  - name: bettersentryio
+    type: grafana-sentry-datasource
+    uid: bettersentryio
+    access: proxy
+    isDefault: true
+    jsonData:
+      url: ${BSIO_API_URL}
+      orgSlug: bettersentryio
+    secureJsonData:
+      authToken: ${BSIO_GRAFANA_TOKEN}

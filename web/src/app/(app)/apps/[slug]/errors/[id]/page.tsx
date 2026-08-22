@@ -3,9 +3,18 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { requireUser } from "@/lib/rbac";
-import { getApp, getEventAttachments, getIssue, getIssueEvent, issueStatus } from "@/lib/bsio";
+import {
+  getApp,
+  getEventAttachments,
+  getIssue,
+  getIssueEvent,
+  getIssueSeries,
+  issueStatus,
+} from "@/lib/bsio";
 import type { EventFrame, EventPayload } from "@/lib/bsio";
 import { IssueActions } from "./issue-actions";
+import { OccurrenceChart } from "@/components/bsio/occurrence-chart";
+import { resolveInterval, resolveRange } from "@/lib/ranges";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -27,13 +36,19 @@ export default async function ErrorIssuePage({
   searchParams,
 }: {
   params: Promise<{ slug: string; id: string }>;
-  searchParams: Promise<{ event?: string }>;
+  searchParams: Promise<{ event?: string; range?: string; interval?: string }>;
 }) {
   await requireUser();
   const { slug, id } = await params;
-  const { event: eventParam } = await searchParams;
+  const { event: eventParam, range: rangeParam, interval: intervalParam } = await searchParams;
+  const range = resolveRange(rangeParam);
+  const interval = resolveInterval(intervalParam);
 
-  const [appResult, issueResult] = await Promise.all([getApp(slug), getIssue(id)]);
+  const [appResult, issueResult, seriesResult] = await Promise.all([
+    getApp(slug),
+    getIssue(id),
+    getIssueSeries(id, range, interval),
+  ]);
   if (!issueResult.ok) {
     if (issueResult.error.includes("404")) notFound();
     return (
@@ -76,7 +91,7 @@ export default async function ErrorIssuePage({
   const attachments = attachmentsResult?.ok ? attachmentsResult.data.attachments : [];
 
   return (
-    <div className="max-w-5xl space-y-6">
+    <div className="space-y-6">
       {app && (
         <ProjectHeader
           app={app}
@@ -122,6 +137,18 @@ export default async function ErrorIssuePage({
         resolved={status === "resolved"}
         archived={status === "archived"}
         priority={issue.priority}
+      />
+
+      {/* ---- occurrence volume ------------------------------------------------- */}
+      <OccurrenceChart
+        title="Occurrences"
+        rows={seriesResult.ok ? seriesResult.data.buckets.map((b) => ({ at: b.at, count: b.count })) : []}
+        series={[{ key: "count", label: "events", color: "var(--status-down)" }]}
+        total={seriesResult.ok ? seriesResult.data.total : 0}
+        intervalSeconds={seriesResult.ok ? seriesResult.data.interval_s : 3600}
+        range={range}
+        interval={interval}
+        error={seriesResult.ok ? undefined : seriesResult.error}
       />
 
       {/* ---- event navigation -------------------------------------------------- */}

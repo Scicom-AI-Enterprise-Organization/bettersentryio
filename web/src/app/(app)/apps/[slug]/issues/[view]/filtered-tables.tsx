@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ActivityBars } from "@/components/bsio/activity-bars";
+import { ConfirmDialog } from "@/components/bsio/confirm-dialog";
 import { SelectBox } from "@/components/bsio/select-box";
 import { Ago, ClockAt, Since } from "@/components/bsio/time";
 import { bulkArchive, bulkDelete, bulkPriority, bulkResolve, type BulkResult } from "./actions";
@@ -115,6 +116,7 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
   const [env, setEnv] = useState("");
   const [status, setStatus] = useState("open");
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [notice, setNotice] = useState<BulkResult | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -234,15 +236,24 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
                 variant="ghost"
                 className="text-status-down hover:text-status-down"
                 disabled={pending}
-                onClick={() => {
-                  if (!window.confirm(`Delete ${selected.size} issue(s) and their events? This cannot be undone.`))
-                    return;
-                  act(bulkDelete);
-                }}
+                onClick={() => setConfirmingDelete(true)}
               >
                 Delete
               </Button>
               {pending && <span className="text-xs text-muted-foreground">working…</span>}
+              <ConfirmDialog
+                open={confirmingDelete}
+                onOpenChange={setConfirmingDelete}
+                title={`Delete ${selected.size} ${selected.size === 1 ? "issue" : "issues"}?`}
+                description="Every stored event goes with them, stacktraces and attachments included. Resolving or archiving keeps the history; this does not."
+                confirmLabel="Delete"
+                destructive
+                pending={pending}
+                onConfirm={() => {
+                  setConfirmingDelete(false);
+                  act(bulkDelete);
+                }}
+              />
             </div>
           )}
           {notice && (
@@ -334,7 +345,9 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
                           {i.times_seen}×
                         </TableCell>
                         <TableCell className="text-right font-mono text-xs tabular-nums text-muted-foreground">
-                          {shortDuration(Math.max(60, (Date.now() - Date.parse(i.first_seen)) / 1000))}
+                          <Since
+                            secs={Math.max(60, (Date.now() - Date.parse(i.first_seen)) / 1000)}
+                          />
                         </TableCell>
                         <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
                           <Ago iso={i.last_seen} />

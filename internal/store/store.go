@@ -172,6 +172,14 @@ func (db *DB) EnsureDefaultProject(ctx context.Context) (Bootstrap, error) {
 		).Scan(&projectID); err != nil {
 			return b, err
 		}
+		// Only on creation: this runs on every boot, and re-importing here would
+		// undo an operator's per-project opt-out at each restart.
+		if _, err := db.Exec(ctx, `
+			insert into project_channels (project_id, channel_id)
+			select $1, id from channels where project_id is null
+			on conflict do nothing`, projectID); err != nil {
+			return b, err
+		}
 	} else if err != nil {
 		return b, err
 	}
@@ -236,6 +244,11 @@ func (db *DB) CreateProject(ctx context.Context, name, platform string) (Bootstr
 	if _, err := tx.Exec(ctx,
 		`insert into ingest_keys (project_id, public_key) values ($1, $2)`, projectID, key,
 	); err != nil {
+		return b, err
+	}
+	// A new project inherits the install's global channels. Alerting from day one is
+	// the useful default; the project's own alerts page is where that gets narrowed.
+	if err := importEveryGlobal(ctx, tx, projectID); err != nil {
 		return b, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -305,14 +318,58 @@ func (db *DB) DeleteProject(ctx context.Context, slug string) (monitors int64, f
 	return monitors, true, nil
 }
 
-// EnsureChannel upserts a named alert channel. Used by --alert-webhook so a
-// single flag is enough to get alerts flowing on a fresh install.
+// EnsureChannel upserts a named global alert channel. Used by --alert-webhook so a
+// single flag is enough to get alerts flowing on a fresh install — which means it
+// must also import itself into every project, or the flag would configure a channel
+// that routes nowhere.
 func (db *DB) EnsureChannel(ctx context.Context, name, kind, configJSON string) error {
-	_, err := db.Exec(ctx, `
-		insert into channels (name, type, config, enabled)
-		values ($1, $2, $3::jsonb, true)
-		on conflict (name) do update set type = excluded.type, config = excluded.config, enabled = true`,
-		name, kind, configJSON)
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var (
+		id       int64
+		inserted bool
+	)
+	// xmax = 0 distinguishes the insert from the update. --alert-webhook is passed on
+	// every boot, so re-importing on the update path would undo a per-project opt-out
+	// at each restart: only a channel that is new to this install imports itself.
+	if err := tx.QueryRow(ctx, `
+		insert into channels (name, type, config, enabled, project_id)
+		values ($1, $2, $3::jsonb, true, null)
+		on conflict (name) where project_id is null
+		do update set type = excluded.type, config = excluded.config, enabled = true
+		returning id, xmax = 0`, name, kind, configJSON).Scan(&id, &inserted); err != nil {
+		return err
+	}
+	if inserted {
+		if err := importIntoEveryProject(ctx, tx, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// importIntoEveryProject subscribes all existing projects to a global channel.
+// Adding a webhook at the install level means "alert me about everything", so the
+// import is the default and un-importing is the per-project opt-out.
+func importIntoEveryProject(ctx context.Context, tx pgx.Tx, channelID int64) error {
+	_, err := tx.Exec(ctx, `
+		insert into project_channels (project_id, channel_id)
+		select id, $1 from projects
+		on conflict do nothing`, channelID)
+	return err
+}
+
+// importEveryGlobal subscribes one project to every global channel, so a project
+// created after the webhooks were configured still alerts.
+func importEveryGlobal(ctx context.Context, tx pgx.Tx, projectID int64) error {
+	_, err := tx.Exec(ctx, `
+		insert into project_channels (project_id, channel_id)
+		select $1, id from channels where project_id is null
+		on conflict do nothing`, projectID)
 	return err
 }
 
@@ -330,7 +387,7 @@ func (db *DB) ProjectMeta(ctx context.Context, id int64) (slug, name string, err
 func (db *DB) ChannelByName(ctx context.Context, name string) (kind string, config map[string]string, enabled, found bool, err error) {
 	var raw []byte
 	err = db.QueryRow(ctx,
-		`select type, config, enabled from channels where name = $1`, name,
+		`select type, config, enabled from channels where name = $1 and project_id is null`, name,
 	).Scan(&kind, &raw, &enabled)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil, false, false, nil
@@ -346,27 +403,57 @@ func (db *DB) ChannelByName(ctx context.Context, name string) (kind string, conf
 // SetChannelEnabled flips a channel without losing its config. Disabling a
 // missing channel is a no-op, not an error.
 func (db *DB) SetChannelEnabled(ctx context.Context, name string, enabled bool) error {
-	_, err := db.Exec(ctx, `update channels set enabled = $2 where name = $1`, name, enabled)
+	_, err := db.Exec(ctx,
+		`update channels set enabled = $2 where name = $1 and project_id is null`, name, enabled)
 	return err
 }
 
 // ErrChannelNameTaken is returned when an alert channel name already exists.
 var ErrChannelNameTaken = errors.New("channel name already taken")
 
-// ChannelInfo is one row on the alert-channels settings page.
+// ChannelInfo is one row on an alert-channels page. Imported is only meaningful
+// for global channels read in a project's context: it says whether this project
+// routes its alerts to that shared definition.
 type ChannelInfo struct {
-	ID      int64
-	Name    string
-	Kind    string
-	URL     string
-	Enabled bool
+	ID       int64
+	Name     string
+	Kind     string
+	URL      string
+	Enabled  bool
+	Imported bool
 }
 
-// ListChannels returns every alert channel, name order, URL pulled out of the
-// config for display.
+// ListChannels returns the global channel catalogue, name order, URL pulled out of
+// the config for display. Project-owned channels are deliberately absent: they
+// belong to their project's page, not the install-wide one.
 func (db *DB) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
-	rows, err := db.Query(ctx,
-		`select id, name, type, coalesce(config->>'url', ''), enabled from channels order by name`)
+	return db.channelRows(ctx, `
+		select id, name, type, coalesce(config->>'url', ''), enabled, false
+		from channels where project_id is null order by name`)
+}
+
+// ListProjectChannels returns the channels a project owns outright.
+func (db *DB) ListProjectChannels(ctx context.Context, projectID int64) ([]ChannelInfo, error) {
+	return db.channelRows(ctx, `
+		select id, name, type, coalesce(config->>'url', ''), enabled, true
+		from channels where project_id = $1 order by name`, projectID)
+}
+
+// ListGlobalChannelsFor returns the whole global catalogue with, per row, whether
+// this project has imported it. The un-imported rows are what the import picker
+// offers, so one query drives both halves of the page.
+func (db *DB) ListGlobalChannelsFor(ctx context.Context, projectID int64) ([]ChannelInfo, error) {
+	return db.channelRows(ctx, `
+		select c.id, c.name, c.type, coalesce(c.config->>'url', ''), c.enabled,
+		       pc.project_id is not null
+		from channels c
+		left join project_channels pc on pc.channel_id = c.id and pc.project_id = $1
+		where c.project_id is null
+		order by c.name`, projectID)
+}
+
+func (db *DB) channelRows(ctx context.Context, query string, args ...any) ([]ChannelInfo, error) {
+	rows, err := db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +461,7 @@ func (db *DB) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
 	out := []ChannelInfo{}
 	for rows.Next() {
 		var c ChannelInfo
-		if err := rows.Scan(&c.ID, &c.Name, &c.Kind, &c.URL, &c.Enabled); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Kind, &c.URL, &c.Enabled, &c.Imported); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -382,33 +469,68 @@ func (db *DB) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
 	return out, rows.Err()
 }
 
-// CreateChannel adds a named channel, enabled. Names are the identity a human
-// deletes by, so a duplicate is an error, not an upsert — EnsureChannel is the
-// boot-flag path that wants upsert semantics.
+// CreateChannel adds a named global channel, enabled and imported everywhere.
+// Names are the identity a human deletes by, so a duplicate is an error, not an
+// upsert — EnsureChannel is the boot-flag path that wants upsert semantics.
 func (db *DB) CreateChannel(ctx context.Context, name, kind, url string) (int64, error) {
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	id, err := insertChannel(ctx, tx, nil, name, kind, url)
+	if err != nil {
+		return 0, err
+	}
+	if err := importIntoEveryProject(ctx, tx, id); err != nil {
+		return 0, err
+	}
+	return id, tx.Commit(ctx)
+}
+
+// CreateProjectChannel adds a channel owned by one project. It needs no import
+// row: a project's own channel routes to that project by construction.
+func (db *DB) CreateProjectChannel(ctx context.Context, projectID int64, name, kind, url string) (int64, error) {
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	id, err := insertChannel(ctx, tx, &projectID, name, kind, url)
+	if err != nil {
+		return 0, err
+	}
+	return id, tx.Commit(ctx)
+}
+
+func insertChannel(ctx context.Context, tx pgx.Tx, projectID *int64, name, kind, url string) (int64, error) {
 	cfg, _ := json.Marshal(map[string]string{"url": url})
 	var id int64
-	err := db.QueryRow(ctx, `
-		insert into channels (name, type, config, enabled)
-		values ($1, $2, $3::jsonb, true)
-		on conflict (name) do nothing
-		returning id`, name, kind, string(cfg)).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	err := tx.QueryRow(ctx, `
+		insert into channels (name, type, config, enabled, project_id)
+		values ($1, $2, $3::jsonb, true, $4)
+		returning id`, name, kind, string(cfg), projectID).Scan(&id)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return 0, ErrChannelNameTaken
 	}
 	return id, err
 }
 
 // UpdateChannel patches a channel: nil fields keep their value. A rename onto
-// an existing name reports ErrChannelNameTaken.
-func (db *DB) UpdateChannel(ctx context.Context, id int64, name, url *string, enabled *bool) (bool, error) {
+// an existing name in the same scope reports ErrChannelNameTaken. scope restricts
+// which rows are reachable, so a project cannot edit the global definition (or
+// another project's channel) by guessing an id.
+func (db *DB) UpdateChannel(ctx context.Context, id int64, scope *int64, name, url *string, enabled *bool) (bool, error) {
 	tag, err := db.Exec(ctx, `
 		update channels set
 			name    = coalesce($2, name),
 			config  = case when $3::text is null then config
 			               else jsonb_set(config, '{url}', to_jsonb($3::text)) end,
 			enabled = coalesce($4, enabled)
-		where id = $1`, id, name, url, enabled)
+		where id = $1 and project_id is not distinct from $5`, id, name, url, enabled, scope)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -419,9 +541,78 @@ func (db *DB) UpdateChannel(ctx context.Context, id int64, name, url *string, en
 	return tag.RowsAffected() > 0, nil
 }
 
-// DeleteChannel removes a channel and its delivery ledger (cascade).
-func (db *DB) DeleteChannel(ctx context.Context, id int64) (bool, error) {
-	tag, err := db.Exec(ctx, `delete from channels where id = $1`, id)
+// DeleteChannel removes a channel and its delivery ledger, import rows and open
+// digest windows (all cascade). scope has the same meaning as in UpdateChannel.
+func (db *DB) DeleteChannel(ctx context.Context, id int64, scope *int64) (bool, error) {
+	tag, err := db.Exec(ctx,
+		`delete from channels where id = $1 and project_id is not distinct from $2`, id, scope)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// ImportChannel subscribes a project to a global channel. Importing an already
+// imported channel is a no-op, so the UI can be optimistic.
+func (db *DB) ImportChannel(ctx context.Context, projectID, channelID int64) (bool, error) {
+	tag, err := db.Exec(ctx, `
+		insert into project_channels (project_id, channel_id)
+		select $1, id from channels where id = $2 and project_id is null
+		on conflict do nothing`, projectID, channelID)
+	if err != nil {
+		return false, err
+	}
+	if tag.RowsAffected() > 0 {
+		return true, nil
+	}
+	// Either it was already imported (fine) or the id is not a global channel (not).
+	var exists bool
+	err = db.QueryRow(ctx, `
+		select exists (select 1 from project_channels pc
+		               join channels c on c.id = pc.channel_id and c.project_id is null
+		               where pc.project_id = $1 and pc.channel_id = $2)`,
+		projectID, channelID).Scan(&exists)
+	return exists, err
+}
+
+// UnimportChannel stops a project alerting to a global channel. The definition
+// survives — this is the per-project opt-out, not a delete.
+func (db *DB) UnimportChannel(ctx context.Context, projectID, channelID int64) (bool, error) {
+	tag, err := db.Exec(ctx,
+		`delete from project_channels where project_id = $1 and channel_id = $2`, projectID, channelID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// ProjectIDBySlug resolves a project slug to its id, or 0 if unknown.
+func (db *DB) ProjectIDBySlug(ctx context.Context, slug string) (int64, error) {
+	var id int64
+	err := db.QueryRow(ctx, `select id from projects where slug = $1`, slug).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	return id, err
+}
+
+// AlertPatience reads a project's patience window in seconds. 0 means every alert
+// is delivered the moment it happens.
+func (db *DB) AlertPatience(ctx context.Context, projectID int64) (int, error) {
+	var secs int
+	err := db.QueryRow(ctx,
+		`select alert_patience_seconds from projects where id = $1`, projectID).Scan(&secs)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	return secs, err
+}
+
+// SetAlertPatience changes a project's patience window. Shortening it does not
+// cut an open window short; the next flush picks up the new value.
+func (db *DB) SetAlertPatience(ctx context.Context, projectID int64, seconds int) (bool, error) {
+	tag, err := db.Exec(ctx,
+		`update projects set alert_patience_seconds = $2 where id = $1`, projectID, seconds)
 	if err != nil {
 		return false, err
 	}

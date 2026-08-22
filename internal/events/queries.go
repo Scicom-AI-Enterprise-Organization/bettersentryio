@@ -49,7 +49,10 @@ const issueColumns = `
 
 // Issues lists a project's issues, newest sighting first. Unresolved only unless asked,
 // because the list exists to answer "what is broken now".
-func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved, includeArchived bool, limit int, tagFilters map[string]string) ([]Issue, error) {
+//
+// since bounds it to issues seen inside a window. The chart above the list is windowed,
+// and a list that ignores the same window disagrees with the chart it sits under.
+func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved, includeArchived bool, limit int, tagFilters map[string]string, since *time.Time) ([]Issue, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
@@ -59,8 +62,9 @@ func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved,
 		join projects p on p.id = i.project_id
 		where p.slug = $1 and ($2 or i.resolved_at is null)
 		  and ($3 or i.archived_at is null
-		       or (i.archived_until is not null and i.archived_until < now()))`
-	args := []any{projectSlug, includeResolved, includeArchived}
+		       or (i.archived_until is not null and i.archived_until < now()))
+		  and ($4::timestamptz is null or i.last_seen >= $4)`
+	args := []any{projectSlug, includeResolved, includeArchived, since}
 	for k, v := range tagFilters {
 		query += fmt.Sprintf(" and i.tags->>$%d = $%d", len(args)+1, len(args)+2)
 		args = append(args, k, v)

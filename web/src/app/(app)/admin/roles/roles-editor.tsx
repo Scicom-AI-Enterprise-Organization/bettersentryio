@@ -6,6 +6,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { ConfirmDialog } from "@/components/bsio/confirm-dialog";
 import { setRolePermissions, createRole, deleteRole } from "./actions";
 
 interface Role {
@@ -28,6 +29,9 @@ export function RolesEditor({
 }) {
   const [pending, start] = useTransition();
   const [newRole, setNewRole] = useState("");
+  // One dialog for the table, pointed at whichever row is pending. window.confirm could
+  // not say that deleting a role is what strips its permissions from everyone holding it.
+  const [confirming, setConfirming] = useState<Role | null>(null);
 
   function togglePerm(role: Role, key: string, checked: boolean) {
     const next = checked
@@ -58,7 +62,7 @@ export function RolesEditor({
   }
 
   function onDelete(role: Role) {
-    if (!confirm(`Delete role "${role.name}"?`)) return;
+    setConfirming(null);
     start(async () => {
       try {
         await deleteRole(role.id);
@@ -114,7 +118,7 @@ export function RolesEditor({
                     variant="ghost"
                     size="icon"
                     disabled={pending}
-                    onClick={() => onDelete(role)}
+                    onClick={() => setConfirming(role)}
                     aria-label="Delete role"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -125,6 +129,22 @@ export function RolesEditor({
           </tbody>
         </table>
       </div>
+
+      <ConfirmDialog
+        open={confirming !== null}
+        onOpenChange={(open) => !open && setConfirming(null)}
+        title={`Delete the ${confirming?.name ?? ""} role?`}
+        description={
+          <>
+            Everyone holding it loses the permissions it grants, immediately. The accounts
+            stay; only this bundle of permissions goes.
+          </>
+        }
+        confirmLabel="Delete role"
+        destructive
+        pending={pending}
+        onConfirm={() => confirming && onDelete(confirming)}
+      />
     </div>
   );
 }

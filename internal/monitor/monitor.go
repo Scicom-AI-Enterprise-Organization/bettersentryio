@@ -236,7 +236,8 @@ func (e *Engine) Beat(ctx context.Context, req BeatRequest) (BeatResult, error) 
 	var recovery *alert.Event
 	if newStatus == StatusOK && (oldStatus == StatusMissing || oldStatus == StatusStalled) {
 		recovery, err = resolveIncident(ctx, tx, resolveArgs{
-			monitorID: monitorID, slug: req.Slug, env: req.Environment,
+			monitorID: monitorID, projectID: req.ProjectID,
+			slug: req.Slug, env: req.Environment,
 			now: now, baseURL: e.baseURL, prevStatus: oldStatus,
 		})
 		if err != nil {
@@ -325,6 +326,7 @@ func ensureMonitor(ctx context.Context, tx pgx.Tx, req BeatRequest) (int64, Conf
 
 type resolveArgs struct {
 	monitorID  int64
+	projectID  int64
 	slug, env  string
 	now        time.Time
 	baseURL    string
@@ -359,6 +361,7 @@ func resolveIncident(ctx context.Context, tx pgx.Tx, a resolveArgs) (*alert.Even
 		Severity:    alert.SeverityOK,
 		Monitor:     a.slug,
 		Environment: a.env,
+		ProjectID:   a.projectID,
 		Status:      string(StatusOK),
 		Title:       fmt.Sprintf("%s recovered", a.slug),
 		Text: fmt.Sprintf("✅ %s (%s) recovered — was %s for %s",

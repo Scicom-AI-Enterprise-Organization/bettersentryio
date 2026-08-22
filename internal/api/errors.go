@@ -82,7 +82,15 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	list, err := s.events.Issues(r.Context(), slug, includeResolved, includeArchived, limit, tagFilters)
+	// ?statsPeriod=30d (or ?start=) narrows the list to issues seen in that window,
+	// so it matches the chart drawn above it.
+	var since *time.Time
+	if from, to := sentryWindow(r.URL.Query()); r.URL.Query().Get("statsPeriod") != "" || r.URL.Query().Get("start") != "" {
+		_ = to
+		since = &from
+	}
+
+	list, err := s.events.Issues(r.Context(), slug, includeResolved, includeArchived, limit, tagFilters, since)
 	if err != nil {
 		s.log.Error("list issues failed", "err", err)
 		writeErr(w, http.StatusServiceUnavailable, "database unavailable")
@@ -265,4 +273,134 @@ func (s *Server) handleIssueEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": eventID, "payload": json.RawMessage(payload)})
+}
+
+// handleIssueSeries answers the occurrence chart on the issue page: how often this
+// issue fired, bucketed over an explicit window.
+//
+// The window is a parameter rather than a fixed 24 hours because "is this still
+// happening" needs a different span for a crash loop than for a once-a-week cron —
+// and a chart whose span you cannot change answers only one of those questions.
+func (s *Server) handleIssueSeries(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(r) {
+		writeErr(w, http.StatusUnauthorized, "missing or invalid credentials")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "issue id must be an integer")
+		return
+	}
+	q := r.URL.Query()
+	from, to := sentryWindow(q)
+	set, err := s.events.EventSeries(r.Context(), events.StatsSearch{
+		Search:   events.Search{IssueIDs: []int64{id}},
+		From:     from,
+		To:       to,
+		Interval: sentryInterval(q.Get("interval"), to.Sub(from)),
+		YAxis:    "count()",
+	})
+	if err != nil {
+		s.log.Error("issue series failed", "issue", id, "err", err)
+		writeErr(w, http.StatusServiceUnavailable, "could not read the occurrence history")
+		return
+	}
+
+	type bucket struct {
+		At    time.Time `json:"at"`
+		Count int64     `json:"count"`
+	}
+	buckets := make([]bucket, 0, len(set.Buckets))
+	var total int64
+	for n, at := range set.Buckets {
+		var v int64
+		if len(set.Series) > 0 && n < len(set.Series[0].Values) {
+			v = int64(set.Series[0].Values[n])
+		}
+		total += v
+		buckets = append(buckets, bucket{At: at, Count: v})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"issue_id":   id,
+		"start":      from,
+		"end":        to,
+		"interval_s": int64(set.Interval.Seconds()),
+		"total":      total,
+		"buckets":    buckets,
+	})
+}
+
+// handleProjectSeries answers the volume chart above an app's error list: events per
+// bucket, split by level, over a window you choose.
+//
+// Split by level because "is this getting worse" and "is this getting noisier" are
+// different questions — a wall of warnings and a wall of errors look identical on a
+// single-series chart.
+func (s *Server) handleProjectSeries(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(r) {
+		writeErr(w, http.StatusUnauthorized, "sign in, or pass an ingest key")
+		return
+	}
+	slug := r.PathValue("slug")
+	projectID, err := s.db.ProjectIDBySlug(r.Context(), slug)
+	if err != nil {
+		s.log.Error("project lookup failed", "slug", slug, "err", err)
+		writeErr(w, http.StatusServiceUnavailable, "database unavailable")
+		return
+	}
+	if projectID == 0 {
+		writeErr(w, http.StatusNotFound, "no such app")
+		return
+	}
+
+	q := r.URL.Query()
+	from, to := sentryWindow(q)
+	set, err := s.events.EventSeries(r.Context(), events.StatsSearch{
+		Search:   events.Search{ProjectIDs: []int64{projectID}},
+		From:     from,
+		To:       to,
+		Interval: sentryInterval(q.Get("interval"), to.Sub(from)),
+		YAxis:    "count()",
+		GroupBy:  []string{"level"},
+		Top:      6,
+	})
+	if err != nil {
+		s.log.Error("project series failed", "slug", slug, "err", err)
+		writeErr(w, http.StatusServiceUnavailable, "could not read the event history")
+		return
+	}
+
+	// One row per bucket with a count per level, which is the shape a stacked bar
+	// chart consumes. Levels are listed separately so the client does not have to
+	// discover them by walking every row.
+	levels := make([]string, 0, len(set.Series))
+	for _, series := range set.Series {
+		levels = append(levels, series.Name)
+	}
+	type bucket struct {
+		At     time.Time        `json:"at"`
+		Counts map[string]int64 `json:"counts"`
+	}
+	buckets := make([]bucket, 0, len(set.Buckets))
+	var total int64
+	for n, at := range set.Buckets {
+		counts := make(map[string]int64, len(set.Series))
+		for _, series := range set.Series {
+			if n < len(series.Values) {
+				v := int64(series.Values[n])
+				counts[series.Name] = v
+				total += v
+			}
+		}
+		buckets = append(buckets, bucket{At: at, Counts: counts})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"project":    slug,
+		"start":      from,
+		"end":        to,
+		"interval_s": int64(set.Interval.Seconds()),
+		"total":      total,
+		"levels":     levels,
+		"buckets":    buckets,
+	})
 }

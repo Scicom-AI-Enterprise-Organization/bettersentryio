@@ -1,0 +1,39 @@
+# Grafana reading bettersentryio through the *official* Sentry datasource.
+#
+# There is no bettersentryio plugin and there never will be: the engine answers
+# Sentry's Web API (internal/api/sentryweb.go), so grafana-sentry-datasource works
+# unmodified — the same bargain D14 struck for the SDKs.
+#
+#   set -a; . ../../.env; set +a          # BSIO_API_TOKEN
+#   docker compose up -d
+#   open http://localhost:3020            # admin / admin
+#
+# The datasource is provisioned already; there is nothing to configure by hand.
+services:
+  grafana:
+    image: grafana/grafana:11.6.0
+    ports:
+      # 3020 because 3000/3001/3010 are usually already something else.
+      - "3020:3000"
+    environment:
+      GF_INSTALL_PLUGINS: grafana-sentry-datasource
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      # Provisioning interpolates these; the token never lands in the repo.
+      BSIO_API_URL: ${BSIO_API_URL:-http://host.docker.internal:9090}
+      # Prefer a token minted in Settings → API tokens: it reads and nothing else, and
+      # revoking it is one click. The operator token is the fallback so a fresh clone
+      # still works, but it can also delete apps — do not leave a dashboard holding it.
+      BSIO_GRAFANA_TOKEN: ${BSIO_GRAFANA_TOKEN:-${BSIO_API_TOKEN:?set BSIO_GRAFANA_TOKEN or BSIO_API_TOKEN — see the repo root .env}}
+    # host.docker.internal is a Docker Desktop convenience; on Linux it does not
+    # exist unless it is mapped, and the datasource URL is the one thing that has to
+    # resolve or nothing works.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./provisioning:/etc/grafana/provisioning
+      - ./dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  grafana_data:

@@ -1,10 +1,11 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/bsio/confirm-dialog";
 import { setUserRoles, deleteUser } from "./actions";
 
 interface User {
@@ -16,6 +17,9 @@ interface User {
 
 export function UsersTable({ users, allRoles }: { users: User[]; allRoles: string[] }) {
   const [pending, start] = useTransition();
+  // One dialog for the table, pointed at whichever row is pending — window.confirm drew
+  // a white box outside the theme and could say nothing about what deleting a user costs.
+  const [confirming, setConfirming] = useState<User | null>(null);
 
   function toggleRole(user: User, role: string, checked: boolean) {
     const next = checked ? [...user.roles, role] : user.roles.filter((r) => r !== role);
@@ -30,7 +34,7 @@ export function UsersTable({ users, allRoles }: { users: User[]; allRoles: strin
   }
 
   function onDelete(user: User) {
-    if (!confirm(`Delete ${user.email}?`)) return;
+    setConfirming(null);
     start(async () => {
       try {
         await deleteUser(user.id);
@@ -42,6 +46,7 @@ export function UsersTable({ users, allRoles }: { users: User[]; allRoles: strin
   }
 
   return (
+    <>
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
@@ -74,7 +79,7 @@ export function UsersTable({ users, allRoles }: { users: User[]; allRoles: strin
                   variant="ghost"
                   size="icon"
                   disabled={pending}
-                  onClick={() => onDelete(u)}
+                  onClick={() => setConfirming(u)}
                   aria-label="Delete user"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -85,5 +90,22 @@ export function UsersTable({ users, allRoles }: { users: User[]; allRoles: strin
         </tbody>
       </table>
     </div>
+
+    <ConfirmDialog
+      open={confirming !== null}
+      onOpenChange={(open) => !open && setConfirming(null)}
+      title={`Delete ${confirming?.email ?? "this user"}?`}
+      description={
+        <>
+          Their account and role assignments are removed. Anything they created stays, and
+          they can be invited again — but they lose access immediately.
+        </>
+      }
+      confirmLabel="Delete user"
+      destructive
+      pending={pending}
+      onConfirm={() => confirming && onDelete(confirming)}
+    />
+    </>
   );
 }

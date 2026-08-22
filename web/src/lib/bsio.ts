@@ -6,6 +6,8 @@
  * API key must never reach the browser.
  */
 
+import { DEFAULT_RANGE } from "@/lib/ranges";
+
 const BASE = process.env.BSIO_API_URL ?? "http://localhost:9090";
 // The operator token (BSIO_API_TOKEN), not an app ingest key: it may create and
 // delete apps, so it stays server-side and never reaches the browser.
@@ -337,9 +339,19 @@ export type IssueDetail = {
   recent: { id: number; received_at: string; message: string }[];
 };
 
-export function getIssues(project: string, opts?: { resolved?: boolean; archived?: boolean }) {
+export function getIssues(
+  project: string,
+  opts?: { resolved?: boolean; archived?: boolean; range?: string; limit?: number },
+) {
   const q =
-    (opts?.resolved ? "&resolved=true" : "") + (opts?.archived ? "&archived=true" : "");
+    (opts?.resolved ? "&resolved=true" : "") +
+    (opts?.archived ? "&archived=true" : "") +
+    // The list has to honour the same window as the chart above it, or the two
+    // disagree about what "24 hours" contains.
+    (opts?.range ? `&statsPeriod=${encodeURIComponent(opts.range)}` : "") +
+    // Absent, the engine returns its default 100 — fine for a list somebody reads, not
+    // for a figure summed from it. The engine's own ceiling is 500.
+    (opts?.limit ? `&limit=${opts.limit}` : "");
   return get<{ issues: Issue[]; counts: IssueCounts }>(
     `/api/0/issues?project=${encodeURIComponent(project)}${q}`,
   );
@@ -374,8 +386,154 @@ export function getIssueEvent(issueID: number | string, eventID: number | string
   return get<{ id: number; payload: EventPayload }>(`/api/0/issues/${issueID}/events/${eventID}`);
 }
 
+export type IssueSeries = {
+  issue_id: number;
+  start: string;
+  end: string;
+  interval_s: number;
+  total: number;
+  buckets: { at: string; count: number }[];
+};
+
+/**
+ * Occurrence volume for one issue. `range` is a Sentry-style span (30d, 24h) and
+ * `interval` may be "auto", in which case the engine fits the buckets to the range.
+ */
+export function getIssueSeries(id: number | string, range = "30d", interval = "auto") {
+  return get<IssueSeries>(
+    `/api/0/issues/${encodeURIComponent(String(id))}/series?${windowQuery(range, interval)}`,
+  );
+}
+
+export type ProjectSeries = {
+  project: string;
+  start: string;
+  end: string;
+  interval_s: number;
+  total: number;
+  /** Levels present in this window, biggest first — the stack order. */
+  levels: string[];
+  buckets: { at: string; counts: Record<string, number> }[];
+};
+
+/** Event volume for a whole app, split by level. */
+export function getProjectSeries(slug: string, range = "30d", interval = "auto") {
+  return get<ProjectSeries>(
+    `/api/0/apps/${encodeURIComponent(slug)}/series?${windowQuery(range, interval)}`,
+  );
+}
+
+export type AnalyticsLevel = { level: string; count: number; issues: number };
+
+export type AnalyticsIssue = {
+  id: number;
+  title: string;
+  culprit: string;
+  level: string;
+  count: number;
+  last_seen: string;
+};
+
+export type AnalyticsRow = { value: string; count: number; issues: number };
+
+/** One grouped top-N over the window. `truncated` means there were more values than rows. */
+export type AnalyticsBreakdown = { field: string; rows: AnalyticsRow[]; truncated: boolean };
+
+/**
+ * The preceding window of the same length, for period-over-period deltas. It carries its
+ * own level split, so a panel can say which level grew rather than only that the total did.
+ */
+export type AnalyticsWindow = {
+  start: string;
+  end: string;
+  total: number;
+  issues: number;
+  levels: AnalyticsLevel[];
+};
+
+/**
+ * One cross-tab: the same events counted against two dimensions at once, pivoted by the
+ * engine so the axes arrive ordered by weight and zero-filled.
+ */
+export type AnalyticsMatrix = {
+  row_field: string;
+  column_field: string;
+  rows: string[];
+  columns: string[];
+  /** Row-major, aligned to `rows` × `columns`. */
+  cells: number[][];
+};
+
+export type ProjectAnalytics = {
+  project: string;
+  start: string;
+  end: string;
+  total: number;
+  issues: number;
+  previous: AnalyticsWindow;
+  levels: AnalyticsLevel[];
+  breakdowns: AnalyticsBreakdown[];
+  matrix: AnalyticsMatrix;
+  top_issues: AnalyticsIssue[];
+};
+
+/**
+ * The figures beside the analytics chart: events, distinct issues, the level split and
+ * the ten issues producing the most of it. Deliberately not a series — getProjectSeries
+ * owns the buckets, so there is only ever one shape of the same data on the page.
+ *
+ * Its totals are an exact [start, end) aggregate, where a series total sums a
+ * zero-filled axis whose first bucket is floored to an interval boundary. The two can
+ * differ by one partial bucket, so a page showing both must print this one.
+ */
+export function getProjectAnalytics(project: string, range = DEFAULT_RANGE) {
+  const q = new URLSearchParams({ project, statsPeriod: range });
+  return get<ProjectAnalytics>(`/api/0/analytics?${q}`);
+}
+
+function windowQuery(range: string, interval: string): string {
+  const q = new URLSearchParams({ statsPeriod: range });
+  // "auto" is the absence of an interval, not a value the engine parses.
+  if (interval && interval !== "auto") q.set("interval", interval);
+  return q.toString();
+}
+
 export function getIssue(id: number | string) {
   return get<IssueDetail>(`/api/0/issues/${id}`);
+}
+
+/* ---- api tokens -------------------------------------------------------------- */
+
+/**
+ * A Sentry-style bearer token, as the engine describes it — never the secret itself.
+ * The plaintext exists once, in the response to its creation, and creation goes through
+ * a server action for exactly that reason: it must not pass through a client component.
+ */
+export type ApiToken = {
+  id: number;
+  name: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+};
+
+export function getApiTokens() {
+  return get<{ tokens: ApiToken[] }>("/api/0/tokens");
+}
+
+/**
+ * Mints a token. The secret in this response is the only copy the engine will ever hand
+ * out — it stores a hash — so a caller that loses it has to revoke and mint again. Call
+ * it from a server action, never from a client component: the plaintext must not travel
+ * through the browser as page data.
+ */
+export function createApiToken(name: string) {
+  return write<{ token: ApiToken; secret: string }>("/api/0/tokens", "POST", { name });
+}
+
+export function revokeApiToken(id: number) {
+  return write<{ revoked: number }>(`/api/0/tokens/${id}`, "DELETE");
 }
 
 /* ---- alerting ---------------------------------------------------------------- */
@@ -392,10 +550,28 @@ export type Channel = {
   type: string;
   url_masked: string;
   enabled: boolean;
+  /** Only meaningful on a global channel read in a project's context. */
+  imported?: boolean;
 };
 
 export function listChannels() {
   return get<{ channels: Channel[] }>("/api/0/channels");
+}
+
+/**
+ * A project's alerting: the channels it owns, the global catalogue with a flag per
+ * row saying whether this project routes to it, and how long it waits before
+ * folding a burst into one digest.
+ */
+export type ProjectAlerts = {
+  channels: Channel[];
+  globals: Channel[];
+  patience_seconds: number;
+  patience_choices: number[];
+};
+
+export function getProjectAlerts(slug: string) {
+  return get<ProjectAlerts>(`/api/0/apps/${encodeURIComponent(slug)}/alerts`);
 }
 
 async function write<T>(path: string, method: string, body?: unknown): Promise<Result<T>> {
@@ -429,6 +605,53 @@ export function updateChannel(
 
 export function deleteChannel(id: number) {
   return write<{ deleted: number }>(`/api/0/channels/${id}`, "DELETE");
+}
+
+/**
+ * Delivers a probe through the live notification path to a channel that has not been
+ * saved. A failure answers with an HTTP error, so `write` folds the upstream's own words
+ * — "404 from teams", "connection refused" — into the Result every caller already
+ * handles: those two send someone to different places, and a bare false sends them
+ * nowhere.
+ */
+export function testChannel(type: string, url: string) {
+  return write<{ tested: true }>("/api/0/channels/test", "POST", { type, url });
+}
+
+/* ---- project-level alerting --------------------------------------------------- */
+
+const app = (slug: string) => `/api/0/apps/${encodeURIComponent(slug)}`;
+
+export function createProjectChannel(slug: string, name: string, type: string, url: string) {
+  return write<Channel>(`${app(slug)}/channels`, "POST", { name, type, url });
+}
+
+export function updateProjectChannel(
+  slug: string,
+  id: number,
+  patch: { name?: string; url?: string; enabled?: boolean },
+) {
+  return write<{ updated: number }>(`${app(slug)}/channels/${id}`, "PUT", patch);
+}
+
+export function deleteProjectChannel(slug: string, id: number) {
+  return write<{ deleted: number }>(`${app(slug)}/channels/${id}`, "DELETE");
+}
+
+/** Import is a reference: the URL stays in the catalogue, so rotating it there
+ *  rotates it for every project that imported it. */
+export function importChannels(slug: string, channelIDs: number[]) {
+  return write<{ imported: number[] }>(`${app(slug)}/channels/import`, "POST", {
+    channel_ids: channelIDs,
+  });
+}
+
+export function unimportChannel(slug: string, id: number) {
+  return write<{ unimported: number }>(`${app(slug)}/channels/import/${id}`, "DELETE");
+}
+
+export function setAlertPatience(slug: string, seconds: number) {
+  return write<{ patience_seconds: number }>(`${app(slug)}/alerts/patience`, "PUT", { seconds });
 }
 
 /** Empty url disables the channel without forgetting it. */

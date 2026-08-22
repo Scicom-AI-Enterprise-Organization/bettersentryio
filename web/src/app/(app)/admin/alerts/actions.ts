@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/rbac";
-import { createChannel, deleteChannel, updateChannel } from "@/lib/bsio";
+import { createChannel, deleteChannel, testChannel, updateChannel } from "@/lib/bsio";
 
 export type ActionState = { ok: boolean; message: string } | null;
 
@@ -45,4 +45,16 @@ export async function removeChannel(id: number): Promise<ActionState> {
   if (!result.ok) return { ok: false, message: result.error };
   revalidatePath("/admin/alerts");
   return { ok: true, message: "Deleted." };
+}
+
+/**
+ * Delivers a probe through the live notification path. Nothing is stored, so a pass
+ * only says "this URL accepted a card just now" — which is exactly the claim the Add
+ * button needs before it opens.
+ */
+export async function testWebhook(type: string, url: string): Promise<ActionState> {
+  await requireUser();
+  const result = await testChannel(type, url);
+  if (!result.ok) return { ok: false, message: result.error };
+  return { ok: true, message: "Test card delivered — check the channel, then add it." };
 }

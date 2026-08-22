@@ -1,10 +1,11 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Copy, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/bsio/confirm-dialog";
 import { revokeInvitation } from "./actions";
 
 interface Invite {
@@ -35,6 +36,7 @@ export function InvitationsTable({
   baseUrl: string;
 }) {
   const [pending, start] = useTransition();
+  const [revoking, setRevoking] = useState<Invite | null>(null);
 
   function copy(token: string) {
     navigator.clipboard.writeText(`${baseUrl}/invite/${token}`);
@@ -42,13 +44,14 @@ export function InvitationsTable({
   }
 
   function onRevoke(i: Invite) {
-    if (!confirm("Revoke this invitation?")) return;
     start(async () => {
       try {
         await revokeInvitation(i.id);
         toast.success("Revoked");
       } catch {
         toast.error("Failed to revoke");
+      } finally {
+        setRevoking(null);
       }
     });
   }
@@ -103,7 +106,7 @@ export function InvitationsTable({
                         variant="ghost"
                         size="icon"
                         disabled={pending}
-                        onClick={() => onRevoke(i)}
+                        onClick={() => setRevoking(i)}
                         aria-label="Revoke invite"
                       >
                         <X className="h-4 w-4" />
@@ -116,6 +119,21 @@ export function InvitationsTable({
           })}
         </tbody>
       </table>
+
+      <ConfirmDialog
+        open={revoking !== null}
+        onOpenChange={(open) => !open && setRevoking(null)}
+        title="Revoke this invitation?"
+        description={
+          revoking?.email
+            ? `The link stops working for ${revoking.email}. Anyone already signed up with it keeps their account.`
+            : "The link stops working for anyone holding it. Anyone already signed up with it keeps their account."
+        }
+        confirmLabel="Revoke invite"
+        destructive
+        pending={pending}
+        onConfirm={() => revoking && onRevoke(revoking)}
+      />
     </div>
   );
 }

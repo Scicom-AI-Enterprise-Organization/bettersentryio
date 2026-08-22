@@ -57,7 +57,7 @@ export function ProjectHeader({
           {title}
         </h2>
         {subtitle && (
-          <p className="mt-1 max-w-3xl text-[15px] text-muted-foreground">
+          <p className="mt-1 text-[15px] text-muted-foreground">
             {subtitle}
             {link && (
               <>

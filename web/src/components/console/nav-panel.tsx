@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronsLeft, ChevronsRight, Plus } from "lucide-react";
@@ -8,6 +8,7 @@ import { ChevronsLeft, ChevronsRight, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ITEM_ICONS, projectInPath, sectionFor, type NavGroup } from "@/lib/nav";
 import { platformMark } from "@/lib/platforms";
+import { NAV_PANEL_COOKIE, rememberPanel } from "@/lib/panel-state";
 
 export type PanelProject = {
   slug: string;
@@ -27,20 +28,27 @@ export type PanelProject = {
 export function ConsoleNavPanel({
   isAdmin = false,
   projects = [],
+  initialCollapsed = false,
 }: {
   isAdmin?: boolean;
   projects?: PanelProject[];
+  /** From the cookie, resolved on the server — see @/lib/panel-state. */
+  initialCollapsed?: boolean;
 }) {
   const pathname = usePathname();
   const section = sectionFor(pathname);
   const activeSlug = projectInPath(pathname);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
+  const collapse = useCallback((next: boolean) => {
+    setCollapsed(next);
+    rememberPanel(NAV_PANEL_COOKIE, next);
+  }, []);
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   if (collapsed) {
     return (
-      <IconRail label={`Expand ${section.label}`} onExpand={() => setCollapsed(false)}>
+      <IconRail label={`Expand ${section.label}`} onExpand={() => collapse(false)}>
         {section.id === "projects"
           ? projects.map((p) => (
               <IconLink
@@ -102,7 +110,7 @@ export function ConsoleNavPanel({
         </div>
         <button
           type="button"
-          onClick={() => setCollapsed(true)}
+          onClick={() => collapse(true)}
           aria-label={`Collapse ${section.label}`}
           className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         >

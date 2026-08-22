@@ -169,6 +169,7 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 	}
 
 	alerter := alert.New(db, log.With("component", "alerter"), 256)
+	alerter.SetBaseURL(cfg.baseURL)
 	engine := monitor.NewEngine(db, alerter, log.With("component", "engine"), cfg.baseURL)
 	detector := monitor.NewDetector(db, alerter, log.With("component", "detector"), cfg.tickInterval, cfg.baseURL)
 

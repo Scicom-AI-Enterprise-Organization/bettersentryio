@@ -68,6 +68,17 @@ bare template's defaults:
   as a warning. `StatCard`'s tone map uses the status tokens for exactly this reason.
 - Mono (`JetBrains Mono`) with `tabular-nums` for every identifier, timestamp and figure.
 - Logo is the company, the caption is the product: `SCICOM` + `BETTERSENTRYIO`.
+- **Every volume chart is windowed, and the window lives in the URL.** `?range=`
+  (default 30d) and `?interval=` (default auto) come from `@/lib/ranges`, and
+  `OccurrenceChart` in `components/bsio/` is the one implementation — bars, a Y axis and
+  a hover tooltip, stacked when there is more than one series. Because the window is a
+  search param and not component state, the **list under a chart is filtered by the same
+  window** (`getIssues(slug, { range })`), so the two cannot disagree, and a link carries
+  the view.
+- **Panel collapse is a cookie, not localStorage** (`@/lib/panel-state`). The layout is
+  server-rendered, so the server has to know before it emits HTML; reading it in the
+  browser paints the expanded sidebar and snaps it shut on hydration. `(app)/layout.tsx`
+  reads it with `next/headers` and passes `initialCollapsed` down.
 
 ### The retired Go UI
 
@@ -96,6 +107,21 @@ starts do not repeat it (it would end up in every log). To read it back:
 ```bash
 psql bettersentryio_dev -tAc 'select public_key from ingest_keys limit 1'
 ```
+
+### When 5432 is already taken
+
+`./scripts/dev.sh` (`make dev-up`) talks to Postgres on 5432 by default. On a machine
+where another project's container already holds that port, a hardcoded 5432 is worse
+than an error: `pg_isready` succeeds, and every `psql`/`createdb` in the script then
+runs against *their* database. Put the port in the gitignored `.env` and move the
+cluster to match:
+
+```bash
+echo 'BSIO_PG_PORT=5434' >> .env
+# and in the cluster: postgresql.conf -> port = 5434, then restart it
+```
+
+Both the engine and `web/.env`'s `DATABASE_URL` then follow that port.
 
 ## With Docker instead
 
@@ -218,6 +244,47 @@ while True:
 - `http://localhost:9090/-/health` — **our own loop ages**. Returns 503 when the
   detector is stale or its sweeps are failing, so this service cannot repeat the
   green-health-check failure that motivated the project.
+
+### Windowed reads in the engine
+
+Two endpoints back the charts, and both take Sentry's window parameters
+(`statsPeriod=30d`, or `start`/`end`, plus an optional `interval`):
+
+| Endpoint | Answers |
+|---|---|
+| `GET /api/0/issues/{id}/series` | one issue's occurrences per bucket |
+| `GET /api/0/apps/{slug}/series` | an app's events per bucket, split by level |
+
+Read requests authenticate with an API token (`Authorization: Bearer bsiot_…`), the
+operator token, or an ingest key. Tokens are managed at `/admin/tokens` and stored as a
+SHA-256 — `GET/POST /api/0/tokens` and `DELETE /api/0/tokens/{id}`, all of which need
+the operator token or a session, because a read credential must not be able to mint
+another one.
+
+`GET /api/0/issues?project=…` accepts `statsPeriod` too, and **`events.Store.Issues`
+grew a `since *time.Time` parameter** to serve it — a signature change worth knowing
+about before you add the next caller. Buckets are zero-filled and epoch-aligned; see
+the interval note in [docs/design/grafana-datasource.md](docs/design/grafana-datasource.md)
+for why that alignment is load-bearing.
+
+## Dashboards: Grafana, with no plugin of ours
+
+The engine answers Sentry's Web API, so Grafana Labs' own
+`grafana-sentry-datasource` queries it unmodified — the read-side version of the
+bargain D14 struck for the SDKs.
+
+```bash
+set -a; . .env; set +a
+cd examples/grafana && docker compose up -d
+open http://localhost:3020          # admin / admin, datasource + dashboard provisioned
+```
+
+Give the datasource a token from **Settings → API tokens** (`/admin/tokens`): `bsiot_…`,
+read-only, revocable on its own, and it records when it was last used. The operator token
+also works and can delete apps, which is exactly why a dashboard should not hold it.
+Details, the supported query types and the traps (`localhost` inside the container is
+Grafana; Sentry reports counts as strings) are in
+[docs/design/grafana-datasource.md](docs/design/grafana-datasource.md).
 
 ## Alerts
 

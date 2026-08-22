@@ -24,7 +24,9 @@ export default async function LearnPage() {
   const example = apps.ok ? apps.data.apps.find((a) => a.connected) : undefined;
 
   return (
-    <div className="max-w-3xl space-y-10 pb-16">
+    // Full width: the guide's tables and code blocks are the reason to be here, and a
+    // 3xl cap squeezed five-column tables into a ribbon with the window half empty.
+    <div className="space-y-10 pb-16">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">How it works</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">

@@ -1,12 +1,11 @@
 "use client";
 
 import { useActionState, useEffect, useState, useTransition } from "react";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { Pencil, Trash2, X } from "lucide-react";
 
 import type { Channel } from "@/lib/bsio";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SelectBox } from "@/components/bsio/select-box";
 import { StatusPill } from "@/components/ui/status-pill";
 import {
   Table,
@@ -17,18 +16,23 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { addChannel, editChannel, removeChannel, toggleChannel, type ActionState } from "./actions";
-
-const TYPE_LABEL: Record<string, string> = {
-  teams: "Teams",
-  slack: "Slack",
-  webhook: "Generic webhook",
-};
+import {
+  addChannel,
+  editChannel,
+  removeChannel,
+  toggleChannel,
+  testWebhook,
+  type ActionState,
+} from "./actions";
+import { CHANNEL_TYPE_LABEL as TYPE_LABEL, ChannelAddForm } from "@/components/bsio/channel-add-form";
+import { ConfirmDialog } from "@/components/bsio/confirm-dialog";
 
 export function ChannelsTable({ channels }: { channels: Channel[] }) {
   const [editing, setEditing] = useState<number | null>(null);
   const [notice, setNotice] = useState<ActionState>(null);
   const [pending, startTransition] = useTransition();
+  // One dialog for the whole table, pointed at whichever row is pending deletion.
+  const [deleting, setDeleting] = useState<Channel | null>(null);
 
   return (
     <div className="space-y-6">
@@ -90,10 +94,7 @@ export function ChannelsTable({ channels }: { channels: Channel[] }) {
                           size="sm"
                           className="text-status-down hover:text-status-down"
                           disabled={pending}
-                          onClick={() => {
-                            if (!window.confirm(`Delete webhook "${c.name}"? Alerts stop immediately.`)) return;
-                            startTransition(async () => setNotice(await removeChannel(c.id)));
-                          }}
+                          onClick={() => setDeleting(c)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           Delete
@@ -114,7 +115,29 @@ export function ChannelsTable({ channels }: { channels: Channel[] }) {
         </p>
       )}
 
-      <AddForm />
+      <ChannelAddForm
+        title="Add a shared webhook"
+        addAction={addChannel}
+        testAction={testWebhook}
+      />
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title={deleting ? `Delete "${deleting.name}"?` : "Delete webhook?"}
+        description="Every project that imported this webhook stops alerting to it immediately. The projects keep their own channels."
+        confirmLabel="Delete webhook"
+        destructive
+        pending={pending}
+        onConfirm={() => {
+          const target = deleting;
+          if (!target) return;
+          startTransition(async () => {
+            setNotice(await removeChannel(target.id));
+            setDeleting(null);
+          });
+        }}
+      />
     </div>
   );
 }
@@ -148,39 +171,5 @@ function EditRow({ channel, done }: { channel: Channel; done: () => void }) {
         </form>
       </TableCell>
     </TableRow>
-  );
-}
-
-function AddForm() {
-  const [state, action, pending] = useActionState<ActionState, FormData>(addChannel, null);
-  return (
-    <div className="rounded-xl border border-dashed border-border p-4">
-      <p className="mb-3 text-sm font-medium">Add a webhook</p>
-      <form action={action} className="flex flex-wrap items-center gap-2">
-        <Input name="name" placeholder="name, e.g. sre-team-chat" className="w-52 text-sm" required />
-        <SelectBox name="type" defaultValue="teams">
-          <option value="teams">Teams</option>
-          <option value="slack">Slack</option>
-          <option value="webhook">Generic webhook</option>
-        </SelectBox>
-        <Input
-          name="url"
-          type="url"
-          placeholder="https://….powerplatform.com/…/triggers/manual/paths/invoke?…"
-          className="min-w-72 flex-1 font-mono text-xs"
-          autoComplete="off"
-          required
-        />
-        <Button type="submit" size="sm" disabled={pending}>
-          <Plus className="h-3.5 w-3.5" />
-          {pending ? "Adding…" : "Add"}
-        </Button>
-      </form>
-      {state && (
-        <p className={`mt-2 text-sm ${state.ok ? "text-status-active" : "text-status-down"}`}>
-          {state.message}
-        </p>
-      )}
-    </div>
   );
 }
