@@ -64,7 +64,11 @@ export function PatienceCard({ slug, seconds, choices }: {
             <SelectTrigger aria-label="Alert patience" className="w-52 bg-card">
               <span className="truncate">{patienceLabel(value)}</span>
             </SelectTrigger>
-            <SelectContent>
+            {/* Explicit, not inherited: item-aligned positions the menu so the selected
+                option covers the trigger, which puts the rest off the top of a page that
+                cannot scroll — present in the DOM and unclickable. This card sits high on
+                the page, so it is exactly the case that breaks. */}
+            <SelectContent position="popper">
               {choices.map((c) => (
                 <SelectItem key={c} value={String(c)}>
                   {patienceLabel(c)}

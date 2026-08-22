@@ -24,7 +24,7 @@ import type {
   ProjectSeries,
   ReleaseRow,
 } from "@/lib/bsio";
-import { RANGES, levelColor, resolveInterval, resolveRange } from "@/lib/ranges";
+import { DEFAULT_RANGE, RANGES, customReady, levelColor, resolveWindow } from "@/lib/ranges";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { StatCard } from "@/components/stat-card";
@@ -42,6 +42,7 @@ import {
 import { ActivityBars } from "@/components/bsio/activity-bars";
 import { OccurrenceChart } from "@/components/bsio/occurrence-chart";
 import { ProjectHeader } from "@/components/bsio/project-tabs";
+import { WindowControls } from "@/components/bsio/window-controls";
 import { Ago, StampAt } from "@/components/bsio/time";
 import { Breakdown, Heatmap, Lifecycle, Matrix, NewIssuesPerDay, Sparkline } from "./panels";
 
@@ -54,13 +55,14 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 }
 
 /**
- * Windows an hour-of-day grid is worth drawing for. Below a day it would fold six cells
- * onto one row; at ninety days it would mean pulling 2160 hourly buckets to answer a
- * question the thirty-day grid already answers.
+ * The span an hour-of-day grid is worth drawing for. Below a day it would fold six cells
+ * onto one row; past a month it would mean pulling thousands of hourly buckets to answer
+ * a question the thirty-day grid already answers.
  */
-const HEATMAP_RANGES = new Set(["24h", "7d", "30d"]);
+const HEATMAP_MIN_SECS = 86_400;
+const HEATMAP_MAX_SECS = 31 * 86_400;
 
-/** The window in seconds, for the figures this page derives rather than fetches. */
+/** Preset spans in seconds, for the figures this page derives rather than fetches. */
 const RANGE_SECONDS: Record<string, number> = {
   "1h": 3_600,
   "6h": 21_600,
@@ -126,22 +128,35 @@ export default async function ProjectAnalyticsPage({
 }) {
   await requireUser();
   const { slug } = await params;
-  const { range: rangeParam, interval: intervalParam } = await searchParams;
-  const range = resolveRange(rangeParam);
-  const interval = resolveInterval(intervalParam);
-  const windowLabel = (RANGES.find((r) => r.value === range)?.label ?? range).replace(/^Last /, "");
-  const windowSecs = RANGE_SECONDS[range] ?? RANGE_SECONDS["30d"];
-  const windowStart = Date.now() - windowSecs * 1000;
+  const w = resolveWindow(await searchParams);
+  // Two timestamps or a span: everything below keys off the *resolved* window, never off
+  // the preset name, so a custom range narrows the tables and the histogram too. A custom
+  // mode with the dates not yet filled in resolves to the default span rather than to an
+  // empty window (see customReady).
+  const custom = customReady(w);
+  const preset = custom ? null : w.range === "custom" ? DEFAULT_RANGE : w.range;
+  const windowSecs = custom
+    ? (Date.parse(w.end!) - Date.parse(w.start!)) / 1000
+    : (RANGE_SECONDS[preset!] ?? RANGE_SECONDS[DEFAULT_RANGE]);
+  const windowStart = custom ? Date.parse(w.start!) : Date.now() - windowSecs * 1000;
+  const windowEnd = custom ? Date.parse(w.end!) : Date.now();
+  // "vs previous 30 days" for a preset; "vs previous window" when the user picked two
+  // timestamps, because there is no name for how long that is.
+  const windowLabel = custom
+    ? "window"
+    : (RANGES.find((r) => r.value === preset)?.label ?? preset!).replace(/^Last /, "");
 
   const [appResult, seriesResult, statsResult, heatResult, issueResult, incidentResult, releaseResult] =
     await Promise.all([
       getApp(slug),
-      getProjectSeries(slug, range, interval),
-      getProjectAnalytics(slug, range),
+      getProjectSeries(slug, w),
+      getProjectAnalytics(slug, w),
       // Fixed 1h buckets: the chart's interval is a control, and at 30 days it snaps to
       // 12h, which cannot carry an hour of the day.
-      HEATMAP_RANGES.has(range) ? getProjectSeries(slug, range, "1h") : Promise.resolve(null),
-      getIssues(slug, { resolved: true, archived: true, range, limit: ISSUE_ROWS }),
+      windowSecs >= HEATMAP_MIN_SECS && windowSecs <= HEATMAP_MAX_SECS
+        ? getProjectSeries(slug, { ...w, interval: "1h" })
+        : Promise.resolve(null),
+      getIssues(slug, { resolved: true, archived: true, window: w, limit: ISSUE_ROWS }),
       getIncidents(),
       getReleases(slug, Math.max(1, Math.min(90, Math.round(windowSecs / 86_400)))),
     ]);
@@ -161,9 +176,10 @@ export default async function ProjectAnalyticsPage({
   // Incidents are global, so they are narrowed to this project's own monitors and to the
   // window on the page — the same two filters the issue views apply.
   const mine = new Set(monitors.map((m) => m.slug));
-  const incidents = (incidentResult.ok ? incidentResult.data.incidents : []).filter(
-    (i) => mine.has(i.monitor) && Date.parse(i.opened_at) >= windowStart,
-  );
+  const incidents = (incidentResult.ok ? incidentResult.data.incidents : []).filter((i) => {
+    const at = Date.parse(i.opened_at);
+    return mine.has(i.monitor) && at >= windowStart && at <= windowEnd;
+  });
   const issues = issueResult.ok ? issueResult.data.issues : [];
   const releases = releaseResult.ok ? releaseResult.data.releases : [];
 
@@ -174,6 +190,13 @@ export default async function ProjectAnalyticsPage({
         title="Analytics"
         subtitle="Event volume for the whole project over a window and a bucket width you choose, the same events sliced by release, host and endpoint, when in the week they arrive, and whether the loops behind them stayed up."
       />
+
+      {/* WindowControls is a fragment of controls, so the row is the page's to provide.
+          It sits under the header rather than in the chart's corner because the window
+          governs everything below it — tiles, panels, tables — not just the chart. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <WindowControls window={w} />
+      </div>
 
       {!app.connected ? (
         <div className="rounded-xl border border-border bg-card p-8 shadow-xs">
@@ -226,8 +249,9 @@ export default async function ProjectAnalyticsPage({
                   color: levelColor(l),
                 }))}
                 intervalSeconds={seriesResult.data.interval_s}
-                range={range}
-                interval={interval}
+                range={w.range}
+                interval={w.interval ?? "auto"}
+                controls={false}
                 height="h-64"
               />
               <Peak series={seriesResult.data} />
@@ -254,7 +278,7 @@ export default async function ProjectAnalyticsPage({
                   <NewIssuesPerDay issues={issues} windowStart={windowStart} />
                 </div>
               )}
-              <Lifecycle issues={issues} windowStart={windowStart} windowLabel={windowLabel} />
+              <Lifecycle issues={issues} windowStart={windowStart} />
             </div>
           )}
 
@@ -343,7 +367,7 @@ function Tiles({
       <StatCard
         label="New issues"
         value={fresh === null ? "—" : fresh.toLocaleString()}
-        sub={fresh === null ? "issue list unavailable" : `first ever seen in the last ${windowLabel}`}
+        sub={fresh === null ? "issue list unavailable" : "first ever seen in this window"}
         tone={fresh ? "warning" : "muted"}
       />
       <StatCard
@@ -816,8 +840,8 @@ function tally(values: string[]): AnalyticsRow[] {
  * cases say what actually happened instead of printing ∞% or a silent dash.
  */
 function delta(now: number, before: number, windowLabel: string): string {
-  if (before === 0 && now === 0) return `nothing in either ${windowLabel}`;
-  if (before === 0) return `first activity in ${windowLabel}`;
+  if (before === 0 && now === 0) return `nothing in this or the previous ${windowLabel}`;
+  if (before === 0) return "first activity in this window";
   if (now === 0) return `all quiet — ${before.toLocaleString()} in the previous ${windowLabel}`;
   const pct = ((now - before) / before) * 100;
   if (Math.abs(pct) < 1) return `level with the previous ${windowLabel}`;

@@ -14,7 +14,7 @@ import {
 import type { EventFrame, EventPayload } from "@/lib/bsio";
 import { IssueActions } from "./issue-actions";
 import { OccurrenceChart } from "@/components/bsio/occurrence-chart";
-import { resolveInterval, resolveRange } from "@/lib/ranges";
+import { resolveWindow } from "@/lib/ranges";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -36,18 +36,24 @@ export default async function ErrorIssuePage({
   searchParams,
 }: {
   params: Promise<{ slug: string; id: string }>;
-  searchParams: Promise<{ event?: string; range?: string; interval?: string }>;
+  searchParams: Promise<{
+    event?: string;
+    range?: string;
+    interval?: string;
+    start?: string;
+    end?: string;
+  }>;
 }) {
   await requireUser();
   const { slug, id } = await params;
-  const { event: eventParam, range: rangeParam, interval: intervalParam } = await searchParams;
-  const range = resolveRange(rangeParam);
-  const interval = resolveInterval(intervalParam);
+  const sp = await searchParams;
+  const eventParam = sp.event;
+  const w = resolveWindow(sp);
 
   const [appResult, issueResult, seriesResult] = await Promise.all([
     getApp(slug),
     getIssue(id),
-    getIssueSeries(id, range, interval),
+    getIssueSeries(id, w),
   ]);
   if (!issueResult.ok) {
     if (issueResult.error.includes("404")) notFound();
@@ -146,8 +152,8 @@ export default async function ErrorIssuePage({
         series={[{ key: "count", label: "events", color: "var(--status-down)" }]}
         total={seriesResult.ok ? seriesResult.data.total : 0}
         intervalSeconds={seriesResult.ok ? seriesResult.data.interval_s : 3600}
-        range={range}
-        interval={interval}
+        range={w.range}
+        interval={w.interval ?? "auto"}
         error={seriesResult.ok ? undefined : seriesResult.error}
       />
 

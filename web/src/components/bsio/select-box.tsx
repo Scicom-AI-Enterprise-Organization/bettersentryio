@@ -97,7 +97,13 @@ export function SelectBox({
         >
           <span className="truncate">{label}</span>
         </SelectTrigger>
-        <SelectContent>
+        {/* Explicit popper, belt and braces. ui/select.tsx now defaults to it, but that
+            file is vendored (web/UPSTREAM.md) and a re-sync would restore the upstream
+            item-aligned default — which positioned every menu at the viewport's
+            bottom-left corner, in a shell that cannot scroll. The menu was in the DOM
+            with the right options and completely unreachable, which is why DOM-level
+            checks all passed while the control did nothing. */}
+        <SelectContent position="popper">
           {options.map((o) => (
             <SelectItem key={o.value} value={o.value === "" ? EMPTY : o.value} disabled={o.disabled}>
               {o.label}

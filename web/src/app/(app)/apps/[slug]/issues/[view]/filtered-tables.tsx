@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import { Search } from "lucide-react";
 
 import type { Issue, Monitor } from "@/lib/bsio";
@@ -23,7 +23,9 @@ import {
 import { ActivityBars } from "@/components/bsio/activity-bars";
 import { ConfirmDialog } from "@/components/bsio/confirm-dialog";
 import { SelectBox } from "@/components/bsio/select-box";
-import { Ago, ClockAt, Since } from "@/components/bsio/time";
+import { WindowControls } from "@/components/bsio/window-controls";
+import type { TimeWindow } from "@/lib/ranges";
+import { Age, Ago, ClockAt, Since } from "@/components/bsio/time";
 import { bulkArchive, bulkDelete, bulkPriority, bulkResolve, type BulkResult } from "./actions";
 
 /* Client-side filtering on the already-fetched page of rows: instant, no
@@ -47,11 +49,36 @@ function statusTone(status: "open" | "resolved" | "archived"): StatusTone {
   return "init";
 }
 
+/**
+ * A filter that lives in the URL without asking the server for anything.
+ *
+ * These four narrow rows the browser already has, so a navigation would be a round
+ * trip for data we are holding — `history.replaceState` updates the address bar (and
+ * Next's useSearchParams) so the view is linkable and survives a reload, at no cost.
+ * The window controls are the opposite case and do navigate: changing the window
+ * changes what the engine must read.
+ */
+function useUrlFilter(key: string, initial: string, fallback: string) {
+  const [value, setValue] = useState(initial);
+  const set = useCallback(
+    (next: string) => {
+      setValue(next);
+      const url = new URL(window.location.href);
+      if (next === fallback) url.searchParams.delete(key);
+      else url.searchParams.set(key, next);
+      window.history.replaceState(null, "", url);
+    },
+    [key, fallback],
+  );
+  return [value, set] as const;
+}
+
 function FilterBar({
   search,
   setSearch,
   selects,
   defaults,
+  trailing,
 }: {
   search: string;
   setSearch: (v: string) => void;
@@ -64,6 +91,8 @@ function FilterBar({
   }[];
   /** The value each select returns to when "cleared" (e.g. status -> open). */
   defaults?: Record<string, string>;
+  /** The window picker, on the same row: one line of controls, not two. */
+  trailing?: React.ReactNode;
 }) {
   const dirty =
     search.trim() !== "" || selects.some((s) => s.value !== (defaults?.[s.label] ?? ""));
@@ -93,6 +122,7 @@ function FilterBar({
           ))}
         </SelectBox>
       ))}
+      {trailing}
       {dirty && (
         <button
           type="button"
@@ -109,12 +139,31 @@ function FilterBar({
   );
 }
 
-export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Issue[] }) {
+export function ErrorIssuesFiltered({
+  slug,
+  issues,
+  chart,
+  window: w,
+  initial,
+}: {
+  slug: string;
+  issues: Issue[];
+  /**
+   * The volume chart, composed by the server component and slotted in here so it sits
+   * under the filter row. It is windowed by its own range/interval controls, not by the
+   * filters above it — those narrow the already-fetched rows in the browser.
+   */
+  chart?: React.ReactNode;
+  /** The window the rows and the chart were fetched for; the picker sits in the row. */
+  window?: TimeWindow;
+  /** Filter values read from the URL on the server, so a link opens filtered. */
+  initial?: { q?: string; status?: string; level?: string; env?: string };
+}) {
   const router = useRouter();
-  const [search, setSearch] = useState("");
-  const [level, setLevel] = useState("");
-  const [env, setEnv] = useState("");
-  const [status, setStatus] = useState("open");
+  const [search, setSearch] = useUrlFilter("q", initial?.q ?? "", "");
+  const [level, setLevel] = useUrlFilter("level", initial?.level ?? "", "");
+  const [env, setEnv] = useUrlFilter("env", initial?.env ?? "", "");
+  const [status, setStatus] = useUrlFilter("status", initial?.status ?? "open", "open");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [notice, setNotice] = useState<BulkResult | null>(null);
@@ -160,9 +209,15 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
       </div>
 
       {issues.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No error has been reported. When the SDK sends one, it groups into an issue here.
-        </p>
+        <>
+          <p className="text-sm text-muted-foreground">
+            No error has been reported in this window. When the SDK sends one, it groups into
+            an issue here.
+          </p>
+          {/* Kept even with nothing to list: the range control lives in the chart, so
+              dropping it would strand anyone who narrowed the window to an hour. */}
+          {chart && <div className="mt-4">{chart}</div>}
+        </>
       ) : (
         <>
           <FilterBar
@@ -180,7 +235,10 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
               { label: "env", value: env, options: envs, set: setEnv },
             ]}
             defaults={{ status: "open" }}
+            trailing={w && <WindowControls window={w} />}
           />
+
+          {chart && <div className="mb-4">{chart}</div>}
 
           {selected.size > 0 && (
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
@@ -345,9 +403,7 @@ export function ErrorIssuesFiltered({ slug, issues }: { slug: string; issues: Is
                           {i.times_seen}×
                         </TableCell>
                         <TableCell className="text-right font-mono text-xs tabular-nums text-muted-foreground">
-                          <Since
-                            secs={Math.max(60, (Date.now() - Date.parse(i.first_seen)) / 1000)}
-                          />
+                          <Age iso={i.first_seen} />
                         </TableCell>
                         <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
                           <Ago iso={i.last_seen} />

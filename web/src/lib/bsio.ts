@@ -6,7 +6,7 @@
  * API key must never reach the browser.
  */
 
-import { DEFAULT_RANGE } from "@/lib/ranges";
+import { windowParams, type TimeWindow } from "@/lib/ranges";
 
 const BASE = process.env.BSIO_API_URL ?? "http://localhost:9090";
 // The operator token (BSIO_API_TOKEN), not an app ingest key: it may create and
@@ -341,20 +341,18 @@ export type IssueDetail = {
 
 export function getIssues(
   project: string,
-  opts?: { resolved?: boolean; archived?: boolean; range?: string; limit?: number },
+  opts?: { resolved?: boolean; archived?: boolean; window?: TimeWindow; limit?: number },
 ) {
-  const q =
-    (opts?.resolved ? "&resolved=true" : "") +
-    (opts?.archived ? "&archived=true" : "") +
-    // The list has to honour the same window as the chart above it, or the two
-    // disagree about what "24 hours" contains.
-    (opts?.range ? `&statsPeriod=${encodeURIComponent(opts.range)}` : "") +
-    // Absent, the engine returns its default 100 — fine for a list somebody reads, not
-    // for a figure summed from it. The engine's own ceiling is 500.
-    (opts?.limit ? `&limit=${opts.limit}` : "");
-  return get<{ issues: Issue[]; counts: IssueCounts }>(
-    `/api/0/issues?project=${encodeURIComponent(project)}${q}`,
-  );
+  const q = new URLSearchParams({ project });
+  if (opts?.resolved) q.set("resolved", "true");
+  if (opts?.archived) q.set("archived", "true");
+  // Absent, the engine returns its default 100 — fine for a list somebody reads, not for
+  // a figure summed from it. The engine's own ceiling is 500.
+  if (opts?.limit) q.set("limit", String(opts.limit));
+  // The list honours the same window as the chart above it, or the two disagree about
+  // what "the last 30 days" contains.
+  if (opts?.window) for (const [k, v] of windowParams(opts.window)) q.set(k, v);
+  return get<{ issues: Issue[]; counts: IssueCounts }>(`/api/0/issues?${q}`);
 }
 
 /** Live triage state, derived the same way the engine filters. */
@@ -399,9 +397,9 @@ export type IssueSeries = {
  * Occurrence volume for one issue. `range` is a Sentry-style span (30d, 24h) and
  * `interval` may be "auto", in which case the engine fits the buckets to the range.
  */
-export function getIssueSeries(id: number | string, range = "30d", interval = "auto") {
+export function getIssueSeries(id: number | string, w: TimeWindow) {
   return get<IssueSeries>(
-    `/api/0/issues/${encodeURIComponent(String(id))}/series?${windowQuery(range, interval)}`,
+    `/api/0/issues/${encodeURIComponent(String(id))}/series?${windowParams(w)}`,
   );
 }
 
@@ -417,9 +415,9 @@ export type ProjectSeries = {
 };
 
 /** Event volume for a whole app, split by level. */
-export function getProjectSeries(slug: string, range = "30d", interval = "auto") {
+export function getProjectSeries(slug: string, w: TimeWindow) {
   return get<ProjectSeries>(
-    `/api/0/apps/${encodeURIComponent(slug)}/series?${windowQuery(range, interval)}`,
+    `/api/0/apps/${encodeURIComponent(slug)}/series?${windowParams(w)}`,
   );
 }
 
@@ -486,16 +484,12 @@ export type ProjectAnalytics = {
  * zero-filled axis whose first bucket is floored to an interval boundary. The two can
  * differ by one partial bucket, so a page showing both must print this one.
  */
-export function getProjectAnalytics(project: string, range = DEFAULT_RANGE) {
-  const q = new URLSearchParams({ project, statsPeriod: range });
+export function getProjectAnalytics(project: string, w: TimeWindow) {
+  const q = new URLSearchParams({ project });
+  // The same window the chart is drawn from. A page whose figures take a preset while
+  // its chart takes two timestamps would be showing two windows at once.
+  for (const [k, v] of windowParams(w)) q.set(k, v);
   return get<ProjectAnalytics>(`/api/0/analytics?${q}`);
-}
-
-function windowQuery(range: string, interval: string): string {
-  const q = new URLSearchParams({ statsPeriod: range });
-  // "auto" is the absence of an interval, not a value the engine parses.
-  if (interval && interval !== "auto") q.set("interval", interval);
-  return q.toString();
 }
 
 export function getIssue(id: number | string) {

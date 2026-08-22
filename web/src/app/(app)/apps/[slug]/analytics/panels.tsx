@@ -429,15 +429,7 @@ export function NewIssuesPerDay({ issues, windowStart }: { issues: Issue[]; wind
  * means either the fix did not work or the resolve was optimistic, and both are worth
  * knowing before the next release.
  */
-export function Lifecycle({
-  issues,
-  windowStart,
-  windowLabel,
-}: {
-  issues: Issue[];
-  windowStart: number;
-  windowLabel: string;
-}) {
+export function Lifecycle({ issues, windowStart }: { issues: Issue[]; windowStart: number }) {
   const fresh = issues.filter((i) => Date.parse(i.first_seen) >= windowStart).length;
   const resolved = issues.filter(
     (i) => i.resolved_at && Date.parse(i.resolved_at) >= windowStart,
@@ -450,7 +442,7 @@ export function Lifecycle({
   const archived = issues.filter((i) => i.archived_at).length;
 
   const cells: { label: string; value: number; tone: string; hint: string }[] = [
-    { label: "New", value: fresh, tone: "text-status-idle", hint: `first seen in the last ${windowLabel}` },
+    { label: "New", value: fresh, tone: "text-status-idle", hint: "first seen in this window" },
     { label: "Resolved", value: resolved, tone: "text-status-active", hint: "marked fixed in this window" },
     { label: "Regressed", value: regressed, tone: "text-status-down", hint: "seen again after a resolve" },
     { label: "Archived", value: archived, tone: "text-muted-foreground", hint: "muted on purpose" },

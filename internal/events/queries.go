@@ -50,9 +50,15 @@ const issueColumns = `
 // Issues lists a project's issues, newest sighting first. Unresolved only unless asked,
 // because the list exists to answer "what is broken now".
 //
-// since bounds it to issues seen inside a window. The chart above the list is windowed,
-// and a list that ignores the same window disagrees with the chart it sits under.
-func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved, includeArchived bool, limit int, tagFilters map[string]string, since *time.Time) ([]Issue, error) {
+// since and until bound it to issues that actually fired inside the window. The chart
+// above the list is windowed, and a list that disagrees with the chart it sits under is
+// worse than no list. Both bounds are optional: nil means unbounded on that side.
+//
+// "Fired inside the window" means an event in it, not a lifetime overlapping it.
+// Measured: with an Aug 10-15 window the overlap test listed issues whose last event was
+// three hours ago, because they started inside the window and are still going — the chart
+// showed 51 events and the list showed rows contributing none of them.
+func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved, includeArchived bool, limit int, tagFilters map[string]string, since, until *time.Time) ([]Issue, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
@@ -63,8 +69,15 @@ func (s *Store) Issues(ctx context.Context, projectSlug string, includeResolved,
 		where p.slug = $1 and ($2 or i.resolved_at is null)
 		  and ($3 or i.archived_at is null
 		       or (i.archived_until is not null and i.archived_until < now()))
-		  and ($4::timestamptz is null or i.last_seen >= $4)`
-	args := []any{projectSlug, includeResolved, includeArchived, since}
+		  -- Cheap prefilter on an indexed column first, then the real test: an issue
+		  -- whose whole life ended before the window cannot have an event inside it.
+		  and ($4::timestamptz is null or i.last_seen >= $4)
+		  and ($4::timestamptz is null or exists (
+		        select 1 from events e
+		        where e.issue_id = i.id
+		          and e.received_at >= $4
+		          and ($5::timestamptz is null or e.received_at < $5)))`
+	args := []any{projectSlug, includeResolved, includeArchived, since, until}
 	for k, v := range tagFilters {
 		query += fmt.Sprintf(" and i.tags->>$%d = $%d", len(args)+1, len(args)+2)
 		args = append(args, k, v)

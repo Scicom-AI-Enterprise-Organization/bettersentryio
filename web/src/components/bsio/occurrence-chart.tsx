@@ -38,6 +38,7 @@ export function OccurrenceChart({
   interval,
   error,
   height = "h-56",
+  controls = true,
 }: {
   title: string;
   rows: ChartRow[];
@@ -54,6 +55,11 @@ export function OccurrenceChart({
   interval: string;
   error?: string;
   height?: string;
+  /**
+   * The range/interval selects in the header. Pass false when the page mounts
+   * WindowControls somewhere else — two pickers for one window is two sources of truth.
+   */
+  controls?: boolean;
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -98,7 +104,8 @@ export function OccurrenceChart({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2" data-pending={pending ? "" : undefined}>
+        {controls && (
+          <div className="flex items-center gap-2" data-pending={pending ? "" : undefined}>
           <Select value={range} onValueChange={(v) => setParam("range", v)}>
             {/* The label is rendered here rather than by SelectValue, which reads its
                 text from the portalled items and so ships empty from the server — the
@@ -106,7 +113,7 @@ export function OccurrenceChart({
             <SelectTrigger className="h-8 w-[150px] text-[13px]" aria-label="Time range">
               <span className="truncate">{RANGES.find((r) => r.value === range)?.label}</span>
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent position="popper">
               {RANGES.map((r) => (
                 <SelectItem key={r.value} value={r.value}>
                   {r.label}
@@ -118,7 +125,7 @@ export function OccurrenceChart({
             <SelectTrigger className="h-8 w-[140px] text-[13px]" aria-label="Bucket interval">
               <span className="truncate">{INTERVALS.find((i) => i.value === interval)?.label}</span>
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent position="popper">
               {INTERVALS.map((i) => (
                 <SelectItem key={i.value} value={i.value}>
                   {i.label}
@@ -126,7 +133,8 @@ export function OccurrenceChart({
               ))}
             </SelectContent>
           </Select>
-        </div>
+          </div>
+        )}
       </div>
 
       {error ? (

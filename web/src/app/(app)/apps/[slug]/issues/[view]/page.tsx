@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/table";
 import { ProjectHeader } from "@/components/bsio/project-tabs";
 import { OccurrenceChart } from "@/components/bsio/occurrence-chart";
-import { levelColor, resolveInterval, resolveRange } from "@/lib/ranges";
+import { levelColor, resolveWindow } from "@/lib/ranges";
 import { ErrorIssuesFiltered, MonitorsFiltered } from "./filtered-tables";
 
 export const dynamic = "force-dynamic";
@@ -39,15 +39,25 @@ export default async function ProjectIssuesPage({
   searchParams,
 }: {
   params: Promise<{ slug: string; view: string }>;
-  searchParams: Promise<{ range?: string; interval?: string }>;
+  searchParams: Promise<{
+    range?: string;
+    interval?: string;
+    start?: string;
+    end?: string;
+    q?: string;
+    status?: string;
+    level?: string;
+    env?: string;
+  }>;
 }) {
   await requireUser();
   const { slug, view: viewId } = await params;
   const view = issueView(viewId);
   if (!view) notFound();
-  const { range: rangeParam, interval: intervalParam } = await searchParams;
-  const range = resolveRange(rangeParam);
-  const interval = resolveInterval(intervalParam);
+  const sp = await searchParams;
+  // One window, read once, used by the chart and the list — the whole point of keeping
+  // it in the URL rather than in component state.
+  const w = resolveWindow(sp);
 
   // The window applies to error events, so it only shapes the outages view; the
   // others are monitor-state lists, where "the last 30 days" has nothing to filter.
@@ -58,9 +68,9 @@ export default async function ProjectIssuesPage({
     // Error issues live on the "Errors & Outages" view; the other views are
     // monitor-state lists and never show them.
     windowed
-      ? getIssues(slug, { resolved: true, archived: true, range })
+      ? getIssues(slug, { resolved: true, archived: true, window: w })
       : Promise.resolve(null),
-    windowed ? getProjectSeries(slug, range, interval) : Promise.resolve(null),
+    windowed ? getProjectSeries(slug, w) : Promise.resolve(null),
   ]);
 
   if (!appResult.ok) {
@@ -94,29 +104,34 @@ export default async function ProjectIssuesPage({
         link={{ href: `/learn#${view.id}`, label: "How to instrument this" }}
       />
 
-      {windowed && app.connected && (
-        <OccurrenceChart
-          title="Events"
-          rows={
-            seriesResult?.ok
-              ? seriesResult.data.buckets.map((b) => ({ at: b.at, ...b.counts }))
-              : []
-          }
-          series={(seriesResult?.ok ? seriesResult.data.levels : []).map((level) => ({
-            key: level,
-            label: level,
-            color: levelColor(level),
-          }))}
-          total={seriesResult?.ok ? seriesResult.data.total : 0}
-          intervalSeconds={seriesResult?.ok ? seriesResult.data.interval_s : 3600}
-          range={range}
-          interval={interval}
-          error={seriesResult && !seriesResult.ok ? seriesResult.error : undefined}
-        />
-      )}
-
       {windowed && app.connected && issueResult?.ok && (
-        <ErrorIssuesFiltered slug={app.slug} issues={issueResult.data.issues} />
+        <ErrorIssuesFiltered
+          slug={app.slug}
+          issues={issueResult.data.issues}
+          window={w}
+          initial={{ q: sp.q, status: sp.status, level: sp.level, env: sp.env }}
+          chart={
+            <OccurrenceChart
+              title="Events"
+              controls={false}
+              rows={
+                seriesResult?.ok
+                  ? seriesResult.data.buckets.map((b) => ({ at: b.at, ...b.counts }))
+                  : []
+              }
+              series={(seriesResult?.ok ? seriesResult.data.levels : []).map((level) => ({
+                key: level,
+                label: level,
+                color: levelColor(level),
+              }))}
+              total={seriesResult?.ok ? seriesResult.data.total : 0}
+              intervalSeconds={seriesResult?.ok ? seriesResult.data.interval_s : 3600}
+              range={w.range}
+              interval={w.interval ?? "auto"}
+              error={seriesResult && !seriesResult.ok ? seriesResult.error : undefined}
+            />
+          }
+        />
       )}
 
       {!app.connected ? (

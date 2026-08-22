@@ -82,15 +82,23 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// ?statsPeriod=30d (or ?start=) narrows the list to issues seen in that window,
-	// so it matches the chart drawn above it.
-	var since *time.Time
-	if from, to := sentryWindow(r.URL.Query()); r.URL.Query().Get("statsPeriod") != "" || r.URL.Query().Get("start") != "" {
-		_ = to
+	// ?statsPeriod=30d, or an explicit ?start=&end=, narrows the list to issues seen in
+	// that window so it matches the chart drawn above it. Absent both, the list is
+	// unbounded and behaves as it always did.
+	var since, until *time.Time
+	q := r.URL.Query()
+	if q.Get("statsPeriod") != "" || q.Get("start") != "" || q.Get("end") != "" {
+		from, to := sentryWindow(q)
 		since = &from
+		// Only bound above when an end was actually given: the default window ends
+		// "now", and a hard upper bound there would drop an issue whose last event
+		// landed while the page was rendering.
+		if q.Get("end") != "" {
+			until = &to
+		}
 	}
 
-	list, err := s.events.Issues(r.Context(), slug, includeResolved, includeArchived, limit, tagFilters, since)
+	list, err := s.events.Issues(r.Context(), slug, includeResolved, includeArchived, limit, tagFilters, since, until)
 	if err != nil {
 		s.log.Error("list issues failed", "err", err)
 		writeErr(w, http.StatusServiceUnavailable, "database unavailable")

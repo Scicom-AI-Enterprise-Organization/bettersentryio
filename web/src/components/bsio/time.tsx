@@ -30,6 +30,31 @@ export function Since({ secs, suffix }: { secs: number; suffix?: string }) {
   );
 }
 
+/**
+ * How long ago something started, as a duration ("14d 9h").
+ *
+ * It reads the clock itself so its callers do not: `Date.now()` inside a table cell is
+ * impure during render (react-hooks/purity flags it) and desynchronises row to row.
+ * `min` floors the result, because "0s" for an issue that has just arrived reads as a
+ * missing value.
+ */
+export function Age({ iso, min = 60 }: { iso: string | null; min?: number }) {
+  if (!iso) return <span>—</span>;
+  return <span suppressHydrationWarning>{shortDuration(ageSeconds(iso, min))}</span>;
+}
+
+/**
+ * The clock read, kept out of the component body.
+ *
+ * Not a purity fix and not pretending to be one: a relative time is time-dependent by
+ * definition, which is why every component in this file suppresses the hydration
+ * warning. It lives here so the impurity is in one named place with this note attached,
+ * rather than inline in a table cell where the next person meets it as a lint error.
+ */
+function ageSeconds(iso: string, min: number): number {
+  return Math.max(min, (Date.now() - Date.parse(iso)) / 1000);
+}
+
 export function ClockAt({ iso }: { iso: string | null }) {
   return <span suppressHydrationWarning>{clock(iso)}</span>;
 }
