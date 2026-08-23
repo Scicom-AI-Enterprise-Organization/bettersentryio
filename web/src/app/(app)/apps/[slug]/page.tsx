@@ -11,5 +11,5 @@ export default async function ProjectIndex({ params }: { params: Promise<{ slug:
   const { slug } = await params;
   const result = await getApp(slug);
   const connected = result.ok && result.data.app.connected;
-  redirect(connected ? `/apps/${slug}/issues/outages` : `/apps/${slug}/setup`);
+  redirect(connected ? `/apps/${slug}/issues/outages` : `/apps/${slug}/settings`);
 }

@@ -228,6 +228,7 @@ func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.envLimit.allow(projectID) {
+		ingestRejected.With("rate_limited").Inc()
 		w.Header().Set("Retry-After", "5")
 		w.Header().Set("X-Sentry-Rate-Limits", "5:error:project")
 		writeErr(w, http.StatusTooManyRequests, "rate limited")
@@ -354,6 +355,9 @@ func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request) {
 		}
 
 		res, err := s.events.IngestRaw(r.Context(), projectID, &e, item.Payload)
+		if err == nil {
+			ingestEvents.Inc()
+		}
 		if err != nil {
 			// Storage down: tell the SDK to retry the envelope rather than
 			// silently eating it. Duplicates on retry group into the same issue.

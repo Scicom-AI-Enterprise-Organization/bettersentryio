@@ -6,7 +6,10 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
 import { StatusPill } from "@/components/ui/status-pill";
-import { ago, monitorTone, type MonitorStatus } from "@/lib/bsio";
+// Statement-level `import type`, not `import { type … }`: the latter can still emit
+// `import {} from "@/lib/bsio"` and keep a runtime edge to a server-only module.
+import type { MonitorStatus } from "@/lib/bsio";
+import { ago, monitorTone } from "@/lib/format";
 
 type Discovered = {
   slug: string;

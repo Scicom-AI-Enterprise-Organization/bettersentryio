@@ -9,9 +9,10 @@ import {
   ChartColumn,
   Gauge,
   KeyRound,
-  Plug,
   Rocket,
+  ScrollText,
   Settings,
+  Settings2,
   ShieldCheck,
   Siren,
   UserCog,
@@ -88,6 +89,7 @@ export const SECTIONS: NavSection[] = [
         items: [
           { label: "Alerts", href: "/admin/alerts", admin: true },
           { label: "API tokens", href: "/admin/tokens", admin: true },
+          { label: "Audit log", href: "/admin/audit", admin: true },
         ],
       },
       { label: "Account", items: [{ label: "Profile", href: "/profile" }] },
@@ -132,9 +134,9 @@ export function projectNav(slug: string): NavItem[] {
     { label: "Warnings", href: `/apps/${slug}/issues/warnings` },
     { label: "Analytics", href: `/apps/${slug}/analytics` },
     { label: "Releases", href: `/apps/${slug}/releases` },
-    // Alerts and Setup are the project's configuration, so they close the list.
+    // Alerts and Settings are the project's configuration, so they close the list.
     { label: "Alerts", href: `/apps/${slug}/alerts` },
-    { label: "Setup", href: `/apps/${slug}/setup` },
+    { label: "Settings", href: `/apps/${slug}/settings` },
   ];
 }
 
@@ -145,7 +147,7 @@ export const ITEM_ICONS: Record<string, React.ElementType> = {
   analytics: ChartColumn,
   releases: Rocket,
   alerts: BellRing,
-  setup: Plug,
+  settings: Settings2,
   "/monitors": Activity,
   "/incidents": Siren,
   "/admin/alerts": BellRing,
@@ -156,6 +158,7 @@ export const ITEM_ICONS: Record<string, React.ElementType> = {
   "/learn#warnings": AlertTriangle,
   "/profile": UserCog,
   "/admin/tokens": KeyRound,
+  "/admin/audit": ScrollText,
   "/admin/users": Users,
   "/admin/roles": ShieldCheck,
   "/admin/organization": Building2,

@@ -16,6 +16,7 @@ import (
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/clients"
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/alert"
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/events"
+	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/metrics"
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/monitor"
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/store"
 )
@@ -39,17 +40,22 @@ type Server struct {
 	started  time.Time
 	session  SessionChecker
 	envLimit envelopeLimiter
+	// audit is the buffered path to audit_log; see internal/api/ops.go.
+	audit chan store.AuditEntry
 }
 
 // New builds the HTTP surface. apiToken is the operator credential the UI presents;
 // when empty the admin endpoints fall back to accepting any ingest key, which is a
 // development convenience the caller is expected to warn about loudly.
 func New(db *store.DB, e *monitor.Engine, d *monitor.Detector, a *alert.Alerter, log *slog.Logger, version, apiToken, baseURL string, session SessionChecker) *Server {
-	return &Server{
+	s := &Server{
 		db: db, events: events.New(db), engine: e, detector: d, alerter: a, log: log,
 		version: version, apiToken: apiToken, baseURL: strings.TrimRight(baseURL, "/"),
 		started: time.Now(), session: session,
 	}
+	s.startAuditWriter()
+	s.registerGauges()
+	return s
 }
 
 func presentedKey(r *http.Request) string {
@@ -141,6 +147,9 @@ func (s *Server) Handler(ui interface{ Routes(*http.ServeMux) }) http.Handler {
 	mux.HandleFunc("GET /api/0/apps/{slug}", s.handleAppDetail)
 	mux.HandleFunc("DELETE /api/0/apps/{slug}", s.handleDeleteApp)
 	mux.HandleFunc("GET /api/0/apps/{slug}/series", s.handleProjectSeries)
+	// Operability (internal/api/ops.go): per-project retention and the audit log.
+	mux.HandleFunc("PUT /api/0/apps/{slug}/retention", s.handleSetRetention)
+	mux.HandleFunc("GET /api/0/audit", s.handleAuditList)
 	// Sentry-compatible ingest (D14, internal/api/envelope.go): where a stock
 	// sentry-sdk DSN points. The project id in the path is numeric, so it can
 	// never collide with the /api/0/ control surface.
@@ -195,6 +204,10 @@ func (s *Server) Handler(ui interface{ Routes(*http.ServeMux) }) http.Handler {
 	// and neither reveals anything beyond our own liveness.
 	mux.HandleFunc("GET /-/health", s.handleHealth)
 	mux.HandleFunc("GET /-/ready", s.handleReady)
+	// Prometheus exposition. Unauthenticated like the probes — the labels carry no
+	// project names or payloads — but meant for in-cluster scraping: the ingress
+	// should not route /-/ paths to the world.
+	mux.HandleFunc("GET /-/metrics", metrics.Handler())
 	// Claim the rest of /api/0/ before the UI's "/" does. The UI's Require() only
 	// knows session cookies, so without this an unrouted API path answers 401
 	// "authentication required" to a caller holding a perfectly good token -- which
@@ -210,7 +223,25 @@ func (s *Server) Handler(ui interface{ Routes(*http.ServeMux) }) http.Handler {
 	if ui != nil {
 		ui.Routes(mux)
 	}
-	return logging(s.log, mux)
+	return s.observe(mux)
+}
+
+// observe is the outermost middleware: request counters for the metrics endpoint,
+// the audit trail for control-plane mutations, and the slow/error log line.
+func (s *Server) observe(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		httpRequests.With(codeClass(rec.code)).Inc()
+		if auditable(r) {
+			s.recordAudit(r, rec.code)
+		}
+		if rec.code >= 400 {
+			s.log.Warn("http", "method", r.Method, "path", r.URL.Path,
+				"status", rec.code, "dur_ms", time.Since(start).Milliseconds())
+		}
+	})
 }
 
 func (s *Server) handleBeat(w http.ResponseWriter, r *http.Request) {
@@ -263,6 +294,7 @@ func (s *Server) handleBeat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "could not record beat")
 		return
 	}
+	beatsTotal.Inc()
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -312,15 +344,23 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	tickAge := s.detector.LastTickAge()
 	maxAge := 3*s.detector.Interval() + 5*time.Second
-	if s.detector.Ticks() == 0 {
-		if time.Since(s.started) > maxAge {
-			problems = append(problems, "detector has never completed a tick")
+	// A standby replica has an old (or absent) tick age *because it is healthy*:
+	// another replica holds the detector lock and this one is correctly doing
+	// nothing. Reporting that as a problem would page on the quiet replica of
+	// every two-replica install.
+	if s.detector.Leading() {
+		if s.detector.Ticks() == 0 {
+			if time.Since(s.started) > maxAge {
+				problems = append(problems, "detector has never completed a tick")
+			}
+		} else if tickAge > maxAge {
+			problems = append(problems, "detector tick is stale ("+tickAge.Round(time.Second).String()+")")
 		}
-	} else if tickAge > maxAge {
-		problems = append(problems, "detector tick is stale ("+tickAge.Round(time.Second).String()+")")
 	}
 	// A detector that runs but fails is reported immediately, not after the
 	// staleness timeout — otherwise this endpoint is green over a blind detector.
+	// Lock-acquisition failures land here too, so a standby that *cannot even try*
+	// is still visible.
 	if f := s.detector.Failures(); f > 0 {
 		problems = append(problems,
 			"detector sweep failing ("+strconv.FormatInt(f, 10)+" consecutive): "+s.detector.LastError())
@@ -340,6 +380,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"last_tick_age_s":      int64(tickAge.Seconds()),
 			"consecutive_failures": s.detector.Failures(),
 			"last_error":           s.detector.LastError(),
+			// false = standing by; another replica holds the detector lock.
+			"leader": s.detector.Leading(),
 		},
 		Alerter: map[string]any{
 			"queue_depth": s.alerter.QueueDepth(),
@@ -408,18 +450,6 @@ func (s *Server) handleAPINotFound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeErr(w, http.StatusNotFound, msg)
-}
-
-func logging(log *slog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
-		next.ServeHTTP(rec, r)
-		if rec.code >= 400 {
-			log.Warn("http", "method", r.Method, "path", r.URL.Path,
-				"status", rec.code, "dur_ms", time.Since(start).Milliseconds())
-		}
-	})
 }
 
 type statusRecorder struct {

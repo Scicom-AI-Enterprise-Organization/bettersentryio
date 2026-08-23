@@ -170,6 +170,7 @@ func (a *Alerter) deliver(ctx context.Context, ev Event) {
 		// The first alert of a quiet spell goes out now; the rest of the burst waits
 		// for the window to close and arrives as one card. openWindow decides which
 		// this is, atomically, so two replicas cannot both call themselves first.
+		opened := false
 		if patience > 0 && ev.ProjectID != 0 {
 			first, err := a.openWindow(ctx, ev.ProjectID, ch.id, patience)
 			if err != nil {
@@ -183,6 +184,8 @@ func (a *Alerter) deliver(ctx context.Context, ev Event) {
 				}
 				a.digested.Add(1)
 				continue
+			} else {
+				opened = true
 			}
 		}
 
@@ -191,6 +194,15 @@ func (a *Alerter) deliver(ctx context.Context, ev Event) {
 			a.log.Error("alert delivery failed", "channel", ch.name, "monitor", ev.Monitor, "err", err)
 			// Release the claim so a later attempt can retry this transition.
 			a.release(ctx, ev.DedupKey, ch.id)
+			// And close the window this attempt opened. Patience rate-limits how often
+			// a channel is *interrupted*; nothing was delivered, so there is nothing to
+			// rate-limit. Leaving it open would fold the retry into a digest and turn a
+			// chat outage from "the alert is seconds late" into "the alert arrives as a
+			// summary line up to a whole window later" — which is the retry path's
+			// entire reason for existing, defeated.
+			if opened {
+				a.closeWindow(ctx, ev.ProjectID, ch.id)
+			}
 			continue
 		}
 		a.sent.Add(1)
@@ -270,6 +282,21 @@ func (a *Alerter) openWindow(ctx context.Context, projectID, channelID int64, pa
 		return false, err
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+// closeWindow undoes an openWindow whose delivery then failed, so the next attempt is
+// immediate again.
+//
+// Only when the window is still empty: another replica may have appended to it between
+// our insert and our failure, and deleting the row would throw those events away.
+func (a *Alerter) closeWindow(ctx context.Context, projectID, channelID int64) {
+	if _, err := a.db.Exec(ctx, `
+		delete from alert_digests
+		where project_id = $1 and channel_id = $2 and jsonb_array_length(pending) = 0`,
+		projectID, channelID,
+	); err != nil {
+		a.log.Error("close patience window failed", "channel_id", channelID, "err", err)
+	}
 }
 
 // digestEntry is one line of a digest card. Kept small on purpose: the card

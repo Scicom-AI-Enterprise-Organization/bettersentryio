@@ -7,6 +7,7 @@ import { ChevronsLeft } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { projectInPath, projectNav, viewIcon } from "@/lib/nav";
+import { pageOfHref, type OptionalPage } from "@/lib/features";
 import { PROJECT_PANEL_COOKIE, rememberPanel } from "@/lib/panel-state";
 import { IconLink, IconRail, type PanelProject } from "./nav-panel";
 
@@ -20,10 +21,13 @@ import { IconLink, IconRail, type PanelProject } from "./nav-panel";
 export function ProjectPanel({
   projects = [],
   initialCollapsed = false,
+  disabledPages = [],
 }: {
   projects?: PanelProject[];
   /** From the cookie, resolved on the server — see @/lib/panel-state. */
   initialCollapsed?: boolean;
+  /** Resolved server-side from BSIO_DISABLED_PAGES — see @/lib/features. */
+  disabledPages?: OptionalPage[];
 }) {
   const pathname = usePathname();
   const slug = projectInPath(pathname);
@@ -36,6 +40,11 @@ export function ProjectPanel({
   if (!slug) return null;
 
   const project = projects.find((p) => p.slug === slug);
+  const nav = (forSlug: string) =>
+    projectNav(forSlug).filter((item) => {
+      const page = pageOfHref(item.href);
+      return !page || !disabledPages.includes(page);
+    });
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   if (collapsed) {
@@ -44,7 +53,7 @@ export function ProjectPanel({
         label={`Expand ${project?.name ?? slug}`}
         onExpand={() => collapse(false)}
       >
-        {projectNav(slug).map((item) => {
+        {nav(slug).map((item) => {
           const Icon = viewIcon(item.href);
           return (
             <IconLink
@@ -84,7 +93,7 @@ export function ProjectPanel({
 
       <nav className="scrollbar-thin flex-1 overflow-y-auto p-2">
         <ul className="space-y-0.5">
-          {projectNav(slug).map((item) => {
+          {nav(slug).map((item) => {
             const Icon = viewIcon(item.href);
             const on = isActive(item.href);
             return (

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { requireUser } from "@/lib/rbac";
+import { pageEnabled } from "@/lib/features";
 import { getApp, getReleases } from "@/lib/bsio";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -31,6 +32,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
  */
 export default async function ReleasesPage({ params }: { params: Promise<{ slug: string }> }) {
   await requireUser();
+  if (!pageEnabled("releases")) notFound();
   const { slug } = await params;
 
   const [appResult, relResult] = await Promise.all([getApp(slug), getReleases(slug)]);

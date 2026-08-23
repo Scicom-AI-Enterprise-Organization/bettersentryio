@@ -66,7 +66,7 @@ export function TokensTable({ tokens }: { tokens: ApiToken[] }) {
             <KeyRound className="h-4 w-4 text-muted-foreground" />
             <p className="text-sm font-medium">No tokens yet.</p>
           </div>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+          <p className="mt-2 text-sm text-muted-foreground">
             Until one exists, the only way to read the API is the operator token from the
             engine&apos;s environment — which can also delete apps, and cannot be revoked
             without a redeploy.

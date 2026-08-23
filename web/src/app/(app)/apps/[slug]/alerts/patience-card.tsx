@@ -31,7 +31,10 @@ export function PatienceCard({ slug, seconds, choices }: {
   const [pending, startTransition] = useTransition();
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
+    // A bare section, like every other block on this page. `bg-card` made it the one
+    // white panel on a page whose sections sit directly on the background — and in light
+    // mode --card is near-white against a grey --background, so it read as a stray sheet.
+    <section>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-[15px] font-semibold tracking-tight">
@@ -88,6 +91,6 @@ export function PatienceCard({ slug, seconds, choices }: {
           {notice.message}
         </p>
       )}
-    </div>
+    </section>
   );
 }

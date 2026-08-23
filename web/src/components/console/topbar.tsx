@@ -50,7 +50,7 @@ function crumbsFor(pathname: string): Crumb[] {
       { label: "Projects", href: "/apps" },
       { label: seg[1], href: `/apps/${seg[1]}` },
     ];
-    if (seg[2] === "setup") trail.push({ label: "Setup" });
+    if (seg[2] === "settings") trail.push({ label: "Settings" });
     else if (seg[2] === "issues" && seg[3]) {
       trail.push({ label: ISSUE_LABELS[seg[3]] ?? titleCase(seg[3]) });
     }

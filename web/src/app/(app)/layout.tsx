@@ -12,6 +12,7 @@ import {
   PROJECT_PANEL_COOKIE,
   panelCollapsed,
 } from "@/lib/panel-state";
+import { disabledPages } from "@/lib/features";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -24,6 +25,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const jar = await cookies();
   const navCollapsed = panelCollapsed(jar.get(NAV_PANEL_COOKIE)?.value);
   const projectCollapsed = panelCollapsed(jar.get(PROJECT_PANEL_COOKIE)?.value);
+
+  // Page flags resolve here, on the server, and travel down as props: the shell
+  // components are client-side and must not read env themselves.
+  const disabled = disabledPages();
 
   const apps = await getApps();
   const projects = apps.ok
@@ -39,13 +44,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <SidebarStateProvider>
       <div className="flex h-screen overflow-hidden bg-background text-foreground">
-        <ConsoleRail />
+        <ConsoleRail disabledPages={disabled} />
         <ConsoleNavPanel
           isAdmin={isAdmin}
           projects={projects}
           initialCollapsed={navCollapsed}
         />
-        <ProjectPanel projects={projects} initialCollapsed={projectCollapsed} />
+        <ProjectPanel
+          projects={projects}
+          initialCollapsed={projectCollapsed}
+          disabledPages={disabled}
+        />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <ConsoleTopbar />
           <div className="scrollbar-thin flex-1 overflow-y-auto px-6 py-6 lg:px-8">

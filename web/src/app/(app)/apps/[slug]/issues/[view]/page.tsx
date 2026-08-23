@@ -3,8 +3,10 @@ import { notFound } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 
 import { requireUser } from "@/lib/rbac";
-import { clock, getApp, getIncidents, getIssues, getProjectSeries, shortDuration } from "@/lib/bsio";
+import { getApp, getIncidents, getIssues, getProjectSeries } from "@/lib/bsio";
+import { clock, shortDuration } from "@/lib/format";
 import { incidentsFor, issueView, monitorsFor } from "@/lib/issues";
+import { pageEnabled } from "@/lib/features";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -54,6 +56,9 @@ export default async function ProjectIssuesPage({
   const { slug, view: viewId } = await params;
   const view = issueView(viewId);
   if (!view) notFound();
+  // Flagged off means gone, not hidden: the nav stops listing the view and the
+  // route refuses it, so a bookmark behaves the same as the menu.
+  if ((view.id === "breached" || view.id === "warnings") && !pageEnabled(view.id)) notFound();
   const sp = await searchParams;
   // One window, read once, used by the chart and the list — the whole point of keeping
   // it in the URL rather than in component state.
@@ -143,7 +148,7 @@ export default async function ProjectIssuesPage({
             itself in.
           </p>
           <Button asChild size="sm" className="mt-4">
-            <Link href={`/apps/${app.slug}/setup`}>
+            <Link href={`/apps/${app.slug}/settings`}>
               Finish setup
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>

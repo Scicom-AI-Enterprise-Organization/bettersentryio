@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { ChevronRight } from "lucide-react";
 
 import { requireUser } from "@/lib/rbac";
+import { pageEnabled } from "@/lib/features";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -18,17 +19,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ActivityBars } from "@/components/bsio/activity-bars";
-import {
-  ago,
-  clock,
-  getMonitor,
-  incidentTone,
-  monitorTone,
-  setMuted,
-  shortDuration,
-  stamp,
-  uptimeLabel,
-} from "@/lib/bsio";
+import { getMonitor, setMuted } from "@/lib/bsio";
+import { ago, clock, incidentTone, monitorTone, shortDuration, stamp, uptimeLabel } from "@/lib/format";
 import { Ago, StampAt } from "@/components/bsio/time";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +32,7 @@ export default async function MonitorDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   await requireUser();
+  if (!pageEnabled("monitors")) notFound();
   const { slug } = await params;
   const result = await getMonitor(slug);
 

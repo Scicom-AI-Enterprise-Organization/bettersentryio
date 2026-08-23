@@ -21,6 +21,8 @@ type App struct {
 	OpenIncident bool
 	OpenIssues   int
 	LastEventAt  *time.Time
+	// RetentionDays: how long this project keeps error events. 0 = forever.
+	RetentionDays int
 }
 
 // Connected reports whether anything has ever arrived from this app — a beat
@@ -31,7 +33,7 @@ func (a App) Connected() bool { return a.Monitors > 0 || a.LastEventAt != nil }
 
 func (e *Engine) Apps(ctx context.Context) ([]App, error) {
 	rows, err := e.db.Query(ctx, `
-		select p.id, p.slug, p.name, p.platform, p.created_at,
+		select p.id, p.slug, p.name, p.platform, p.created_at, p.retention_days,
 		       coalesce((select k.public_key from ingest_keys k
 		                  where k.project_id = p.id and k.revoked_at is null
 		                  order by k.created_at limit 1), ''),
@@ -59,7 +61,7 @@ func (e *Engine) Apps(ctx context.Context) ([]App, error) {
 	var out []App
 	for rows.Next() {
 		var a App
-		if err := rows.Scan(&a.ID, &a.Slug, &a.Name, &a.Platform, &a.CreatedAt, &a.Key,
+		if err := rows.Scan(&a.ID, &a.Slug, &a.Name, &a.Platform, &a.CreatedAt, &a.RetentionDays, &a.Key,
 			&a.Monitors, &a.Unhealthy, &a.LastBeatAt, &a.OpenIncident,
 			&a.OpenIssues, &a.LastEventAt); err != nil {
 			return nil, err

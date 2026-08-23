@@ -1,5 +1,8 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
+
 import { requireUser } from "@/lib/rbac";
+import { pageEnabled } from "@/lib/features";
 import { StatusPill } from "@/components/ui/status-pill";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -11,7 +14,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getIncidents, incidentTone, shortDuration, stamp } from "@/lib/bsio";
+import { getIncidents } from "@/lib/bsio";
+import { incidentTone, shortDuration, stamp } from "@/lib/format";
 import { StampAt } from "@/components/bsio/time";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +23,7 @@ export const revalidate = 0;
 
 export default async function IncidentsPage() {
   await requireUser();
+  if (!pageEnabled("monitors")) notFound();
   const result = await getIncidents();
 
   if (!result.ok) {

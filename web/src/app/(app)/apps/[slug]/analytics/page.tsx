@@ -3,18 +3,8 @@ import { notFound } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 
 import { requireUser } from "@/lib/rbac";
-import {
-  getApp,
-  getIncidents,
-  getIssues,
-  getProjectAnalytics,
-  getProjectSeries,
-  getReleases,
-  issueStatus,
-  monitorTone,
-  shortDuration,
-  uptimeLabel,
-} from "@/lib/bsio";
+import { getApp, getIncidents, getIssues, getProjectAnalytics, getProjectSeries, getReleases } from "@/lib/bsio";
+import { issueStatus, monitorTone, shortDuration, uptimeLabel } from "@/lib/format";
 import type {
   AnalyticsRow,
   Incident,
@@ -25,6 +15,7 @@ import type {
   ReleaseRow,
 } from "@/lib/bsio";
 import { DEFAULT_RANGE, RANGES, customReady, levelColor, resolveWindow } from "@/lib/ranges";
+import { pageEnabled } from "@/lib/features";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { StatCard } from "@/components/stat-card";
@@ -142,6 +133,13 @@ export default async function ProjectAnalyticsPage({
   const windowEnd = custom ? Date.parse(w.end!) : Date.now();
   // "vs previous 30 days" for a preset; "vs previous window" when the user picked two
   // timestamps, because there is no name for how long that is.
+  // Analytics is never itself optional, but half of it reports on surfaces that are:
+  // loop reliability is the Monitors section, and release health is the Releases page.
+  // An install that turned those off must not have them resurrected here — nor be shown
+  // links into routes that now answer 404 (see @/lib/features).
+  const showMonitors = pageEnabled("monitors");
+  const showReleases = pageEnabled("releases");
+  const showBreached = pageEnabled("breached");
   const windowLabel = custom
     ? "window"
     : (RANGES.find((r) => r.value === preset)?.label ?? preset!).replace(/^Last /, "");
@@ -157,8 +155,10 @@ export default async function ProjectAnalyticsPage({
         ? getProjectSeries(slug, { ...w, interval: "1h" })
         : Promise.resolve(null),
       getIssues(slug, { resolved: true, archived: true, window: w, limit: ISSUE_ROWS }),
-      getIncidents(),
-      getReleases(slug, Math.max(1, Math.min(90, Math.round(windowSecs / 86_400)))),
+      showMonitors ? getIncidents() : Promise.resolve(null),
+      showReleases
+        ? getReleases(slug, Math.max(1, Math.min(90, Math.round(windowSecs / 86_400))))
+        : Promise.resolve(null),
     ]);
 
   if (!appResult.ok) {
@@ -176,12 +176,12 @@ export default async function ProjectAnalyticsPage({
   // Incidents are global, so they are narrowed to this project's own monitors and to the
   // window on the page — the same two filters the issue views apply.
   const mine = new Set(monitors.map((m) => m.slug));
-  const incidents = (incidentResult.ok ? incidentResult.data.incidents : []).filter((i) => {
+  const incidents = (incidentResult?.ok ? incidentResult.data.incidents : []).filter((i) => {
     const at = Date.parse(i.opened_at);
     return mine.has(i.monitor) && at >= windowStart && at <= windowEnd;
   });
   const issues = issueResult.ok ? issueResult.data.issues : [];
-  const releases = releaseResult.ok ? releaseResult.data.releases : [];
+  const releases = releaseResult?.ok ? releaseResult.data.releases : [];
 
   return (
     <div className="space-y-6">
@@ -207,7 +207,7 @@ export default async function ProjectAnalyticsPage({
             configuration, and nothing to switch on.
           </p>
           <Button asChild size="sm" className="mt-4">
-            <Link href={`/apps/${app.slug}/setup`}>
+            <Link href={`/apps/${app.slug}/settings`}>
               Finish setup
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>
@@ -221,8 +221,9 @@ export default async function ProjectAnalyticsPage({
               windowLabel={windowLabel}
               issues={issueResult.ok ? issues : null}
               windowStart={windowStart}
-              incidents={incidentResult.ok ? incidents : null}
+              incidents={incidentResult?.ok ? incidents : null}
               monitors={monitors}
+              availability={showMonitors}
             />
           )}
 
@@ -282,10 +283,17 @@ export default async function ProjectAnalyticsPage({
             </div>
           )}
 
-          {releases.length > 0 && <ReleaseHealth slug={app.slug} releases={releases} />}
+          {showReleases && releases.length > 0 && (
+            <ReleaseHealth slug={app.slug} releases={releases} />
+          )}
 
-          {monitors.length > 0 && (
-            <LoopReliability slug={app.slug} monitors={monitors} incidents={incidents} />
+          {showMonitors && monitors.length > 0 && (
+            <LoopReliability
+              slug={app.slug}
+              monitors={monitors}
+              incidents={incidents}
+              linkBreached={showBreached}
+            />
           )}
 
           {statsResult.ok && (
@@ -323,6 +331,7 @@ function Tiles({
   windowStart,
   incidents,
   monitors,
+  availability,
 }: {
   stats: ProjectAnalytics;
   windowLabel: string;
@@ -330,6 +339,9 @@ function Tiles({
   windowStart: number;
   incidents: Incident[] | null;
   monitors: Monitor[];
+  /** False on an install with the Monitors section turned off: the last three tiles
+   *  report on loops, and an errors-only install has no place to follow them to. */
+  availability: boolean;
 }) {
   const of = (...levels: string[]) =>
     stats.levels.filter((l) => levels.includes(l.level)).reduce((n, l) => n + l.count, 0);
@@ -382,6 +394,8 @@ function Tiles({
         sub={`${percent(warnings, stats.total)} of events`}
         tone={warnings > 0 ? "warning" : "muted"}
       />
+      {availability && (
+        <>
       <StatCard
         label="Incidents"
         value={incidents === null ? "—" : incidents.length.toLocaleString()}
@@ -418,6 +432,8 @@ function Tiles({
         }
         tone={uptime === null ? "muted" : uptime >= 99.5 ? "positive" : uptime >= 95 ? "warning" : "negative"}
       />
+        </>
+      )}
     </div>
   );
 }
@@ -623,10 +639,13 @@ function LoopReliability({
   slug,
   monitors,
   incidents,
+  linkBreached,
 }: {
   slug: string;
   monitors: Monitor[];
   incidents: Incident[];
+  /** Breached Metrics is optional too, and a link to a 404 is worse than no link. */
+  linkBreached: boolean;
 }) {
   const perMonitor = new Map<string, number>();
   for (const i of incidents) {
@@ -706,11 +725,16 @@ function LoopReliability({
       </TableCard>
       <p className="mt-2 text-[13px] text-muted-foreground">
         Uptime is measured over each monitor&apos;s own observed window, which starts at its
-        first beat — a monitor created yesterday cannot report a month.{" "}
-        <Link href={`/apps/${slug}/issues/breached`} className="text-primary hover:underline">
-          Breached metrics
-        </Link>{" "}
-        explains what each state means.
+        first beat — a monitor created yesterday cannot report a month.
+        {linkBreached && (
+          <>
+            {" "}
+            <Link href={`/apps/${slug}/issues/breached`} className="text-primary hover:underline">
+              Breached metrics
+            </Link>{" "}
+            explains what each state means.
+          </>
+        )}
       </p>
     </section>
   );

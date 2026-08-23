@@ -22,7 +22,13 @@ make check        # gofmt -w + go vet + go test
   a production build instead, and then needs `npm run build` in `web/` first.
 - **Postgres-backed tests** read `BSIO_TEST_DATABASE_URL` and `t.Skip` without it, so a
   green `go test` does not always mean the SQL ran. Set it before trusting a state-machine
-  change.
+  change. Measured: 18 tests across `internal/store` and `internal/monitor` had been
+  taking the skip path locally, because the `bettersentryio` role cannot `CREATE DATABASE`
+  and so `bettersentryio_test` never existed. Create it once as the local superuser
+  (`createdb -p <port> -O bettersentryio bettersentryio_test`) and export the DSN. It must
+  be a **separate database** from the dev one — these tests `truncate`. The first run
+  after that found a real bug the skip had been hiding, which is the argument for doing
+  it: a suite that skips is the same lie as a health check that always says ok.
 - Browser-driving a page under `next dev`: the route compiles and hydrates on first hit,
   so filling a form immediately after `domcontentloaded` submits into a dead handler and
   lands back on `/login` with a 200. Wait for the field to be visible, then a beat more.
@@ -134,6 +140,68 @@ breakdowns, an environment × level cross-tab, and a top-10 leaderboard. Read-on
   sqrt against the maximum put every quiet cell within a few percent of every other and
   the grid read as one flat wash.
 
+## Alerting (`internal/alert`, `internal/api/alerts.go`)
+
+- **A global channel is a catalogue entry, not a subscription.** `/admin/alerts` holds
+  definitions; a project alerts to one only if `project_channels` says so. Compatibility
+  is kept by importing on *creation*, in three places: migration 0007 backfills every
+  existing pair, `CreateProject` imports the whole catalogue, `CreateChannel` imports
+  itself everywhere.
+- **Do not "fix" the import guards.** `EnsureChannel` imports only when the row is new
+  (`xmax = 0`) and `EnsureDefaultProject` only when it creates the project. Both run on
+  every boot — `--alert-webhook` is passed each time — so importing unconditionally would
+  silently undo an operator's per-project opt-out at every restart. They look like
+  oversights and are not.
+- **Import is a reference, not a copy.** Rotating a URL in the catalogue rotates it for
+  every importer; that is the reason to import rather than paste.
+- **Patience is a burst window, not a delay.** The first alert in a quiet window goes out
+  immediately; anything during the window is collected and arrives as one digest when it
+  closes (`projects.alert_patience_seconds`, default 600). The row in `alert_digests`
+  *is* the window — inserting it is both the test for "am I first" and the claim, which
+  is what keeps two replicas from both calling themselves first.
+- **A failed send must close the window it opened.** Patience rate-limits how often a
+  channel is *interrupted*; a delivery that failed interrupted nobody. Leaving the window
+  open folds the retry into a digest, turning a chat outage from "the alert is seconds
+  late" into "it arrives as a summary line up to ten minutes later" — which defeats the
+  retry path's entire purpose. This shipped broken and was caught by
+  `TestUndeliveredAlertIsRetriedUntilItLands`, one of the tests that had been skipping.
+  Close it only while `pending` is empty: another replica may have appended.
+- **A webhook must pass a live test before it can be saved** (`POST /api/0/channels/test`,
+  shared UI in `components/bsio/channel-add-form.tsx`). The probe goes through the same
+  payload builder and HTTP client a real alert uses — a test travelling different code
+  proves nothing about what you are about to save. Single attempt, unlike the live path's
+  three: a human is watching, and six seconds to say "connection refused" teaches them to
+  distrust the button. The pass is keyed on `(type, URL)`, not a boolean, so editing
+  either closes the gate again.
+- **The detector's alert-retry query is project-scoped too.** An incident whose project
+  routes to no channel must stop retrying rather than retry forever.
+
+## Operability surface (retention, audit, metrics)
+
+- **Retention defaults to off** (`projects.retention_days = 0`). The hourly sweep
+  (`internal/events/retention.go`) runs under `store.LockRetention` via
+  `TryAdvisoryLock` — session advisory locks must live on a dedicated connection or
+  they leak to the pool's next borrower, which is exactly what that helper handles.
+- **Audit is middleware, not per-handler calls** (`internal/api/ops.go`): every
+  mutating `/api/0/*` request is recorded with actor + status; the data plane is
+  excluded by name. `X-BSIO-Actor` is trusted only alongside the operator token —
+  anything that can reach the port can send a header, only our server holds the token.
+  Writes are async and drop-with-a-counter, never blocking the audited action.
+- **Audit paging is keyset, and the cursor is `"<at>,<id>"`** — the whole sort key, not
+  just the id. Offset is wrong here because the table is appended to while somebody reads
+  it: a row arriving at the top shifts page 2 down, so the reader re-reads a row or skips
+  one, and "did I see everything" is the only question an audit log has to answer. The id
+  alone looks sufficient — `InsertAudit` takes `at` from the column default, so id order
+  and `at` order agree for every row the engine writes — and it is not: seed history with
+  explicit timestamps and the two disagree, the cursor then means a different position
+  than the `ORDER BY` does, and pages repeat. Measured, before the fix: 19 rows collected
+  across two pages of which 10 were distinct. `TestListAuditPagesCorrectlyWhenIDOrderFightsTimeOrder`
+  is the guard. A mangled cursor is a 400, never a silent first page.
+- **Metrics are hand-rolled** (`internal/metrics`) because D2a allows one Go
+  dependency. Counters + callback gauges, no histograms — latency distribution belongs
+  to the ingress. Register gauges with closures over live values; never maintain a
+  stored copy.
+
 ## UI conventions
 
 Beyond the visual rules in [DEVELOPING.md](DEVELOPING.md) (dark default, status tokens
@@ -178,11 +246,25 @@ rather than `--chart-*` for meaning, mono + `tabular-nums` for every figure):
 - **Panel collapse is a cookie**, not localStorage (`@/lib/panel-state`). The layout is
   server-rendered, so the server must know before it emits HTML; reading it in the
   browser paints the expanded sidebar and snaps it shut on hydration.
+- **No width caps on paragraphs, no cards on bare pages.** The user has asked
+  repeatedly: intro paragraphs run the full content width (`max-w-*` on a `<p>` gets
+  removed on sight), and a page whose sections are bare `<section>`s does not get a
+  `bg-card` panel dropped into it — in light mode `--card` is near-white on the grey
+  background and reads as pasted in from another screen.
 - **Anything that reads the clock during render** needs the wrappers in
   `@/components/bsio/time.tsx` — server and client render a second apart, which is a
   hydration mismatch (React #418). `Date.now()` inline in a cell is the usual culprit.
 
-### `web/src/lib/bsio.ts`
+### Page flags
+
+`BSIO_DISABLED_PAGES` (see `@/lib/features`) turns off `monitors`/`breached`/
+`warnings`/`releases`. Two rules: the env var is read **server-side only** and travels
+to the shell components as props — never `NEXT_PUBLIC_*`, which would freeze the flags
+into the build; and every flagged page guards its own route with `notFound()` — the nav
+merely stops advertising what the route already refuses. A new optional page needs the
+key in `OPTIONAL_PAGES`, the guard in its page, and the filter hook in `pageOfHref`.
+
+### `web/src/lib/bsio.ts` is server-only; `@/lib/format` is for the browser
 
 One client module for the engine. `get`/`write` stay **unexported**: they are the only
 place the operator token is attached, and keeping them private is what stops a client
@@ -190,10 +272,26 @@ component importing something that reaches the engine with it. Add a function he
 than exporting the helper. Everything is server-only and returns `Result<T>` — it never
 throws, so a page can say "the engine is unreachable" instead of crashing.
 
+**Never export a display helper from bsio.ts.** Pure formatters (`ago`, `clock`,
+`shortDuration`, `issueStatus`, tone maps, …) live in `@/lib/format`, because a client
+component importing them from bsio.ts pulls the whole server module — operator token,
+`auth()`, and through SAML, Node's `fs` — into the browser bundle. Measured: adding the
+`auth()` import for actor attribution turned that latent edge into a hard
+`Module not found: 'fs'` on /monitors. Three rules that fall out of it:
+
+- Types from bsio.ts are fine in client components, but only as **statement-level**
+  `import type { X } from "…"`. The inline form `import { type X }` can still emit a
+  runtime import and keep the edge.
+- **`tsc --noEmit` passing proves nothing about the client/server split** — it cannot
+  see bundle boundaries. It was green on both sides of this breakage. Only loading the
+  route through the dev server proves the split holds.
+- A new formatter goes in `@/lib/format` (or stays local to the component), never in
+  bsio.ts, even when the data it formats comes from there.
+
 ### `web/src/lib/nav.ts`
 
 `projectNav()` is the per-project order: Errors & Outages, Breached Metrics, Warnings,
-Analytics, Releases, Alerts, Setup — lists first, configuration last.
+Analytics, Releases, Alerts, Settings — lists first, configuration last.
 
 **Every nav item needs an `ITEM_ICONS` entry** (project views keyed by last path segment,
 admin items by full path) or the collapsed rail renders a blank, unlabelled row. That bug
@@ -214,6 +312,17 @@ Two or three Claude sessions routinely share this checkout and the dev database.
 - The dev database is shared and the user is looking at it. Anything you create while
   testing is visible to them as real data — name it obviously and delete it when you are
   done. Two test tokens named `grafana` were reported as a duplicate-creation bug.
+
+## Verification
+
+Twice in two days a check passed while the property it stood for was broken: the
+dropdown menus were in the DOM with the right options but rendered off-screen and
+unclickable, and `tsc` was green while the browser bundle was pulling the operator
+token's module through a client import. Both passing checks were **structural** (the
+element exists, the types resolve); both failing properties were **behavioural** (can
+you click it, does it bundle). When verifying, ask what behaviour the feature promises
+and test that — click the control and assert its geometry, load the route through the
+dev server — rather than the structure that usually accompanies it.
 
 ## Style
 

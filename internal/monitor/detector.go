@@ -26,6 +26,12 @@ type Detector struct {
 	ticks        atomic.Int64
 	failures     atomic.Int64 // consecutive failed sweeps
 	lastErr      atomic.Pointer[string]
+
+	// leading: whether this replica holds LockDetector and therefore sweeps. The
+	// lock handle itself is only touched from Run's goroutine; the flag is atomic
+	// because /-/health and the metrics endpoint read it from request goroutines.
+	leading atomic.Bool
+	lock    *store.AdvisoryLock
 }
 
 func NewDetector(db *store.DB, a *alert.Alerter, log *slog.Logger, interval time.Duration, baseURL string) *Detector {
@@ -53,6 +59,12 @@ func (d *Detector) LastError() string {
 	return ""
 }
 
+// Leading reports whether this replica holds the detector lock. A standby replica
+// with an old tick age is healthy — /-/health and the alert rules must read this
+// before treating staleness as a problem, or a two-replica install pages on the
+// replica that is correctly doing nothing.
+func (d *Detector) Leading() bool { return d.leading.Load() }
+
 // LastTickAge reports how long ago the detector completed a sweep. This is the
 // number /-/health exists to publish: if this grows, we are blind, and we say so
 // instead of returning a cheerful 200 like the health check that cost us two days.
@@ -67,13 +79,62 @@ func (d *Detector) LastTickAge() time.Duration {
 func (d *Detector) Run(ctx context.Context) {
 	t := time.NewTicker(d.interval)
 	defer t.Stop()
+	defer func() {
+		// Releasing on the way out lets a standby take over within one tick of a
+		// graceful shutdown instead of waiting for the connection to be reaped.
+		if d.lock != nil {
+			d.lock.Release()
+			d.lock = nil
+		}
+		d.leading.Store(false)
+	}()
 	d.log.Info("detector started", "interval", d.interval)
+
+	// Whichever replica holds the advisory lock detects; the rest serve ingest and
+	// UI, and say so (ARCHITECTURE, "one detector per database"). The lock is held
+	// across ticks on its dedicated connection rather than re-raced every tick —
+	// cheaper, and failover falls out of the semantics: a session lock dies with its
+	// connection, so the holder crashing IS the standby's signal to take over.
+	standbyLogged := false
 	for {
 		select {
 		case <-ctx.Done():
 			d.log.Info("detector stopped")
 			return
 		case <-t.C:
+			// Held locks can be lost silently — a database restart drops the
+			// connection and the lock with it, while this process keeps running.
+			// The per-tick ping turns that into an explicit demotion instead of
+			// two replicas both believing they lead.
+			if d.lock != nil && !d.lock.Alive(ctx) {
+				d.lock.Release()
+				d.lock = nil
+				d.leading.Store(false)
+				d.log.Warn("detector lock lost — standing by until re-acquired")
+			}
+			if d.lock == nil {
+				lock, err := d.db.TryAdvisoryLock(ctx, store.LockDetector)
+				if err != nil {
+					if ctx.Err() == nil {
+						msg := err.Error()
+						d.failures.Add(1)
+						d.lastErr.Store(&msg)
+						d.log.Error("detector lock attempt failed", "err", err)
+					}
+					continue
+				}
+				if lock == nil {
+					if !standbyLogged {
+						d.log.Info("detector standing by — another replica holds the lock")
+						standbyLogged = true
+					}
+					continue
+				}
+				d.lock = lock
+				d.leading.Store(true)
+				standbyLogged = false
+				d.log.Info("detector lock acquired — this replica detects")
+			}
 			if stats, err := d.Tick(ctx, time.Now().UTC()); err != nil {
 				if ctx.Err() == nil {
 					msg := err.Error()

@@ -30,7 +30,7 @@ export async function addApp(_prev: AddAppState, formData: FormData): Promise<Ad
   revalidatePath("/apps");
   // redirect() throws, so it must be outside the try/catch shape above; the query
   // carries the setup page's initial state rather than persisting a UI preference.
-  redirect(`/apps/${result.data.slug}/setup?created=1&progress=${progress}`);
+  redirect(`/apps/${result.data.slug}/settings?created=1&progress=${progress}`);
 }
 
 export type DeleteAppState = { error?: string };

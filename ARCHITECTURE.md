@@ -114,10 +114,14 @@ batch is a transaction, a `kill -9` mid-write loses the in-flight batch and noth
 torn rows, no recovery step. Readers (UI, detector) use the same small `pgxpool` and never block
 on ingest thanks to MVCC.
 
-**Multi-replica path (post-v1, unlocked by D2).** Nothing in the design assumes a single process
-except the detector, which must tick exactly once. Guard it with
-`pg_try_advisory_lock(<detector-key>)` at the top of each tick: whichever replica holds the lock
-detects, the rest serve ingest and UI. That turns HA into a replica-count change rather than a
+**Multi-replica path (built).** Nothing in the design assumes a single process except the
+detector, which must tick exactly once. It is guarded with `pg_try_advisory_lock(LockDetector)`,
+held across ticks on a dedicated connection rather than re-raced each tick: whichever replica
+holds the lock detects, the rest stand by (and say so — `/-/health` reports `leader: false`
+instead of a stale tick, and `bsio_detector_leader` is the metric to alert on). A session lock
+dies with its connection, so the holder crashing *is* the standby's takeover signal; a per-tick
+ping on the holding connection turns the reverse case — the lock dying under a live holder —
+into a demotion instead of split-brain. That turns HA into a replica-count change rather than a
 rewrite — the thing a single-writer file could never offer.
 
 ## 3. Data model

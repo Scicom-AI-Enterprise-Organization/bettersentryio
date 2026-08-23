@@ -1,4 +1,4 @@
-import { ago, clock, shortDuration, stamp } from "@/lib/bsio";
+import { ago, clock, shortDuration, stamp } from "@/lib/format";
 
 /**
  * Time rendered on the server and hydrated on the client will differ, because "9s ago"

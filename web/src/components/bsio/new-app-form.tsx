@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { slugify } from "@/lib/bsio";
+import { slugify } from "@/lib/format";
 import { PLATFORMS, PLATFORM_GROUPS, type PlatformId } from "@/lib/platforms";
 import { addApp, type AddAppState } from "@/app/(app)/apps/actions";
 

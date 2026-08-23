@@ -267,6 +267,40 @@ about before you add the next caller. Buckets are zero-filled and epoch-aligned;
 the interval note in [docs/design/grafana-datasource.md](docs/design/grafana-datasource.md)
 for why that alignment is load-bearing.
 
+## Operability: retention, audit, metrics
+
+**Retention** is per project and **off by default** — `retention_days = 0` keeps events
+forever, because deleting error history is a decision, not a side effect of installing
+the platform. Set it on the project's Settings page (or `PUT /api/0/apps/{slug}/retention`);
+an hourly sweep under an advisory lock removes events, attachments, and fully-expired
+issues in 5k-row batches. Issue counts survive the events they summarise. Heartbeats and
+incident history are not touched.
+
+**The audit log** records every control-plane mutation — method, path, actor, how they
+authenticated, and the status returned — in engine middleware, so a handler added next
+month is audited without anyone remembering to say so. The data plane (beats, envelopes,
+`/api/0/errors`) is excluded by name. The UI forwards the signed-in user as
+`X-BSIO-Actor`, trusted only alongside the operator token; read it at `/admin/audit` or
+`GET /api/0/audit`. Writes are asynchronous and best-effort: a full queue drops entries
+and says so in `bsio_audit_dropped_total` rather than slowing the action being audited.
+
+**Metrics** are Prometheus text at `GET /-/metrics` — hand-rolled exposition
+(`internal/metrics`), because D2a caps this binary at one Go dependency and the useful
+subset is a page of code. Counters for requests, ingest, rejections, beats, retention
+deletions and audit drops; callback gauges for the pool, detector age/failures, and the
+alerter. Unauthenticated like the probes — scrape it in-cluster and do not route `/-/`
+paths through the public ingress.
+
+## Page flags
+
+`BSIO_DISABLED_PAGES` (web process env, comma-separated) turns off optional surfaces:
+`monitors` (the wall, monitor detail, incident log), `breached`, `warnings`,
+`releases`. **Unset means everything is on.** A disabled page 404s and leaves the nav —
+hiding without disabling would be a lie a bookmark could expose. The prod manifest ships
+with all four off (errors-only install); clear the variable when services start sending
+heartbeats. Note the outages table links each monitor to its detail page, so do not
+disable `monitors` on an install that actually uses heartbeat monitors.
+
 ## Dashboards: Grafana, with no plugin of ours
 
 The engine answers Sentry's Web API, so Grafana Labs' own

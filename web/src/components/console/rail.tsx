@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 import { HOME, SECTIONS, sectionFor } from "@/lib/nav";
+import type { OptionalPage } from "@/lib/features";
 import { RailMark } from "@/components/bsio/rail-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu } from "./user-menu";
@@ -16,9 +17,14 @@ import { UserMenu } from "./user-menu";
  * anything. Its only job is choosing which panel is open, so it holds no state of its
  * own — the current path decides what is active.
  */
-export function ConsoleRail() {
+export function ConsoleRail({ disabledPages = [] }: { disabledPages?: OptionalPage[] }) {
   const pathname = usePathname();
   const active = sectionFor(pathname).id;
+  // The Monitors rail entry is the only section behind a flag. Its routes 404 while
+  // disabled, so the rail merely stops advertising what the server already refuses.
+  const sections = SECTIONS.filter(
+    (s) => !(s.id === "monitors" && disabledPages.includes("monitors")),
+  );
 
   return (
     <nav className="hidden w-[68px] shrink-0 flex-col items-center border-r border-border bg-sidebar py-2 md:flex">
@@ -31,7 +37,7 @@ export function ConsoleRail() {
       </Link>
 
       <ul className="flex flex-1 flex-col items-center gap-1">
-        {SECTIONS.map((s) => {
+        {sections.map((s) => {
           const Icon = s.icon;
           const on = s.id === active;
           return (

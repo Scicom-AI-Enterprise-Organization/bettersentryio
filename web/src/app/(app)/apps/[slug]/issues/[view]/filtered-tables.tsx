@@ -6,7 +6,7 @@ import { useCallback, useMemo, useState, useTransition } from "react";
 import { Search } from "lucide-react";
 
 import type { Issue, Monitor } from "@/lib/bsio";
-import { issueStatus, monitorTone, shortDuration } from "@/lib/bsio";
+import { issueStatus, monitorTone, shortDuration } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusPill } from "@/components/ui/status-pill";

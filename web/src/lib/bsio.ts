@@ -7,6 +7,18 @@
  */
 
 import { windowParams, type TimeWindow } from "@/lib/ranges";
+import { auth } from "@/lib/auth";
+
+/**
+ * SERVER ONLY. This module holds the operator token and calls `auth()`, which reaches
+ * the SAML provider and therefore Node's `fs`. Importing it from a client component
+ * pulls that whole chain into the browser bundle and breaks the build with
+ * `Can't resolve 'fs'` deep inside node_modules, naming nothing that would help.
+ *
+ * Client components need display helpers, not fetchers: those live in `@/lib/format`.
+ * Types are safe to import from here anywhere — `import type` is erased and creates no
+ * runtime edge.
+ */
 
 const BASE = process.env.BSIO_API_URL ?? "http://localhost:9090";
 // The operator token (BSIO_API_TOKEN), not an app ingest key: it may create and
@@ -70,6 +82,31 @@ export type Summary = {
 /** EngineDown is returned instead of throwing so a page can say so plainly. */
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
+/**
+ * Who is doing this, for the engine's audit log.
+ *
+ * The engine trusts `X-BSIO-Actor` only on a request that also carries the operator
+ * token — which is exactly this module and nothing that can otherwise reach the port —
+ * so attaching the signed-in email here is what turns an audit row from "operator" into
+ * the person who clicked the button.
+ *
+ * Attached to mutations only. Reads are not audited, and `auth()` is a session lookup
+ * per call: the analytics page alone makes seven reads, and paying for seven session
+ * reads to annotate rows nobody writes is a cost with no reader.
+ *
+ * It never throws. Attribution is worth having, but it is not worth being the reason a
+ * delete fails — an unattributed row still records that the delete happened.
+ */
+async function actorHeader(): Promise<Record<string, string>> {
+  try {
+    const email = (await auth())?.user?.email;
+    // The engine caps the header at 200 characters and ignores anything longer.
+    return email ? { "X-BSIO-Actor": email.slice(0, 200) } : {};
+  } catch {
+    return {};
+  }
+}
+
 async function get<T>(path: string): Promise<Result<T>> {
   try {
     const res = await fetch(`${BASE}${path}`, {
@@ -112,77 +149,17 @@ export async function setMuted(slug: string, muted: boolean): Promise<Result<unk
   try {
     const res = await fetch(
       `${BASE}/api/0/monitors/${encodeURIComponent(slug)}/mute?muted=${muted}`,
-      { method: "POST", headers: { "X-BSIO-Key": KEY }, cache: "no-store" },
+      {
+        method: "POST",
+        headers: { "X-BSIO-Key": KEY, ...(await actorHeader()) },
+        cache: "no-store",
+      },
     );
     if (!res.ok) return { ok: false, error: `The engine returned ${res.status}.` };
     return { ok: true, data: await res.json() };
   } catch {
     return { ok: false, error: "Cannot reach the bettersentryio engine." };
   }
-}
-
-/* ---- presentation helpers -------------------------------------------------- */
-
-import type { StatusTone } from "@/components/ui/status-pill";
-
-/**
- * Maps monitor state onto the shared four-tone status system.
- *
- * `late` is deliberately `idle` (amber) rather than `down`: overdue inside its
- * grace window is a warning, not an outage. `stalled` is amber too — the loop is
- * alive, just not working — which keeps red meaning "no heartbeat at all".
- */
-export function monitorTone(status: MonitorStatus): StatusTone {
-  switch (status) {
-    case "ok":
-      return "active";
-    case "late":
-      return "idle";
-    case "stalled":
-      return "idle";
-    case "missing":
-      return "down";
-    default:
-      return "muted";
-  }
-}
-
-export function incidentTone(kind: Incident["kind"]): StatusTone {
-  return kind === "stalled" ? "idle" : "down";
-}
-
-export function shortDuration(seconds: number): string {
-  const s = Math.max(0, Math.round(seconds));
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
-  return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
-}
-
-export function ago(iso: string | null): string {
-  if (!iso) return "never";
-  return `${shortDuration((Date.now() - new Date(iso).getTime()) / 1000)} ago`;
-}
-
-export function clock(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleTimeString([], { hour12: false });
-}
-
-export function stamp(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString([], {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-}
-
-export function uptimeLabel(pct: number): string {
-  return pct >= 99.995 ? "100%" : `${(Math.floor(pct * 100) / 100).toFixed(2)}%`;
 }
 
 /* ---- apps ------------------------------------------------------------------ */
@@ -201,6 +178,8 @@ export type App = {
   open_issues: number;
   last_event_at: string | null;
   connected: boolean;
+  /** Days of events kept; 0 keeps them forever. Swept hourly by the engine. */
+  retention_days: number;
 };
 
 export function getApps() {
@@ -353,15 +332,6 @@ export function getIssues(
   // what "the last 30 days" contains.
   if (opts?.window) for (const [k, v] of windowParams(opts.window)) q.set(k, v);
   return get<{ issues: Issue[]; counts: IssueCounts }>(`/api/0/issues?${q}`);
-}
-
-/** Live triage state, derived the same way the engine filters. */
-export function issueStatus(i: Issue): "open" | "resolved" | "archived" {
-  if (i.archived_at && (!i.archived_until || Date.parse(i.archived_until) > Date.now())) {
-    return "archived";
-  }
-  if (i.resolved_at) return "resolved";
-  return "open";
 }
 
 export function resolveIssue(id: number, resolved: boolean) {
@@ -530,6 +500,73 @@ export function revokeApiToken(id: number) {
   return write<{ revoked: number }>(`/api/0/tokens/${id}`, "DELETE");
 }
 
+/* ---- retention and audit ------------------------------------------------------ */
+
+/** 0 = keep forever (the default). Changing it is an admin action and lands in the audit log. */
+export function setAppRetention(slug: string, days: number) {
+  return write<{ slug: string; retention_days: number }>(
+    `/api/0/apps/${encodeURIComponent(slug)}/retention`,
+    "PUT",
+    { days },
+  );
+}
+
+/**
+ * One mutating call, as the engine recorded it. `actor` is an email when the UI made the
+ * call (see actorHeader), and otherwise says which credential did: "operator", a token
+ * prefix, or an ingest key prefix.
+ */
+export type AuditEntry = {
+  id: number;
+  at: string;
+  actor: string;
+  via: "session" | "operator" | "token" | "key" | "none";
+  action: string;
+  status: number;
+  remote_addr: string;
+  detail: unknown;
+};
+
+/**
+ * One page of the log, plus whether there is more in either direction.
+ *
+ * Keyset rather than offset: the table is appended to while somebody reads it, and with
+ * OFFSET a row arriving at the top shifts page 2 down — so the reader re-reads a row or
+ * skips one. "Did I see everything" has to be answerable in an audit log.
+ */
+export type AuditPage = {
+  entries: AuditEntry[];
+  has_older: boolean;
+  has_newer: boolean;
+};
+
+export function getAuditLog(opts?: {
+  actor?: string;
+  action?: string;
+  limit?: number;
+  /** Defaults to the last 30 days at the call site; omit only to ask for all of history. */
+  window?: TimeWindow;
+  /**
+   * Page cursors: pass at most one. `before` walks toward older rows, `after` back.
+   *
+   * A cursor is `"<entry.at>,<entry.id>"` — the whole sort key, not just the id, because
+   * the log is ordered by time and an id alone only agrees with that while nothing has
+   * ever backfilled a row with an explicit timestamp.
+   */
+  before?: string;
+  after?: string;
+}) {
+  const q = opts?.window ? windowParams(opts.window) : new URLSearchParams();
+  // The audit log has no chart, so a bucket interval would be noise in the URL.
+  q.delete("interval");
+  if (opts?.actor) q.set("actor", opts.actor);
+  if (opts?.action) q.set("action", opts.action);
+  if (opts?.limit) q.set("limit", String(opts.limit));
+  if (opts?.before) q.set("before", opts.before);
+  if (opts?.after) q.set("after", opts.after);
+  return get<AuditPage>(`/api/0/audit?${q}`);
+}
+
 /* ---- alerting ---------------------------------------------------------------- */
 
 export type TeamsAlert = { configured: boolean; url_masked: string };
@@ -572,7 +609,7 @@ async function write<T>(path: string, method: string, body?: unknown): Promise<R
   try {
     const res = await fetch(`${BASE}${path}`, {
       method,
-      headers: { "X-BSIO-Key": KEY, "Content-Type": "application/json" },
+      headers: { "X-BSIO-Key": KEY, "Content-Type": "application/json", ...(await actorHeader()) },
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store",
     });
@@ -653,7 +690,7 @@ export async function setTeamsAlert(url: string): Promise<Result<TeamsAlert>> {
   try {
     const res = await fetch(`${BASE}/api/0/alerts/teams`, {
       method: "PUT",
-      headers: { "X-BSIO-Key": KEY, "Content-Type": "application/json" },
+      headers: { "X-BSIO-Key": KEY, "Content-Type": "application/json", ...(await actorHeader()) },
       body: JSON.stringify({ url }),
       cache: "no-store",
     });
@@ -678,7 +715,7 @@ export async function createApp(
   try {
     const res = await fetch(`${BASE}/api/0/apps`, {
       method: "POST",
-      headers: { "X-BSIO-Key": KEY, "Content-Type": "application/json" },
+      headers: { "X-BSIO-Key": KEY, "Content-Type": "application/json", ...(await actorHeader()) },
       body: JSON.stringify({ name, platform }),
       cache: "no-store",
     });
@@ -695,22 +732,11 @@ export async function createApp(
   }
 }
 
-/** Mirrors store.Slugify in the engine so the form can preview the slug. */
-export function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64)
-    .replace(/-+$/g, "");
-}
-
 export async function deleteApp(slug: string): Promise<Result<{ monitors_removed: number }>> {
   try {
     const res = await fetch(`${BASE}/api/0/apps/${encodeURIComponent(slug)}`, {
       method: "DELETE",
-      headers: { "X-BSIO-Key": KEY },
+      headers: { "X-BSIO-Key": KEY, ...(await actorHeader()) },
       cache: "no-store",
     });
     const body = await res.json().catch(() => ({}));

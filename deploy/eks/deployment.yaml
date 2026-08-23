@@ -135,6 +135,10 @@ spec:
               containerPort: 3000
           env:
             # In-cluster, so the operator token never traverses the ingress.
+            # Errors-only install: the heartbeat surfaces stay off until something
+            # actually sends heartbeats. Unset (or set to "") to turn everything on.
+            - name: BSIO_DISABLED_PAGES
+              value: monitors,breached,warnings,releases
             - name: BSIO_API_URL
               value: http://bettersentryio-engine.bettersentryio.svc.cluster.local:9090
             # What the generated SDK snippets tell services to call. Public, because the

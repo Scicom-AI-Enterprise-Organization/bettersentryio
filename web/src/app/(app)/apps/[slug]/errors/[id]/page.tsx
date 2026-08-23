@@ -3,14 +3,8 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { requireUser } from "@/lib/rbac";
-import {
-  getApp,
-  getEventAttachments,
-  getIssue,
-  getIssueEvent,
-  getIssueSeries,
-  issueStatus,
-} from "@/lib/bsio";
+import { getApp, getEventAttachments, getIssue, getIssueEvent, getIssueSeries } from "@/lib/bsio";
+import { issueStatus } from "@/lib/format";
 import type { EventFrame, EventPayload } from "@/lib/bsio";
 import { IssueActions } from "./issue-actions";
 import { OccurrenceChart } from "@/components/bsio/occurrence-chart";

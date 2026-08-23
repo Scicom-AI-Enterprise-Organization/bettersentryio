@@ -24,6 +24,8 @@ type appDTO struct {
 	OpenIssues   int        `json:"open_issues"`
 	LastEventAt  *time.Time `json:"last_event_at"`
 	Connected    bool       `json:"connected"`
+	// 0 = keep forever, which is the default: deleting history is opt-in.
+	RetentionDays int `json:"retention_days"`
 }
 
 func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +46,7 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 			Monitors: a.Monitors, Unhealthy: a.Unhealthy, LastBeatAt: a.LastBeatAt,
 			OpenIncident: a.OpenIncident, OpenIssues: a.OpenIssues,
 			LastEventAt: a.LastEventAt, Connected: a.Connected(),
+			RetentionDays: a.RetentionDays,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"apps": out})
@@ -132,6 +135,7 @@ func (s *Server) handleAppDetail(w http.ResponseWriter, r *http.Request) {
 			Monitors: app.Monitors, Unhealthy: app.Unhealthy, LastBeatAt: app.LastBeatAt,
 			OpenIncident: app.OpenIncident, OpenIssues: app.OpenIssues,
 			LastEventAt: app.LastEventAt, Connected: app.Connected(),
+			RetentionDays: app.RetentionDays,
 		},
 		"monitors": monitors,
 	})

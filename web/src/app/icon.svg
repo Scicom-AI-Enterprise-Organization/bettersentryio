@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="bettersentryio">
+  <!--
+    The brand mark as a favicon: the rail mark's distinctive half, three Scicom-orange
+    dots over the two rules. This is what Chrome and Firefox use; favicon.ico carries
+    the same mark for Safari, which ignores SVG favicons. Keep the three in step —
+    web/scripts/make-icons.py regenerates the raster pair.
+
+    An SVG favicon can read the browser's theme, which a .ico cannot, so the chip
+    lightens on dark chrome instead of dissolving into it.
+  -->
+  <style>
+    .chip { fill: #22242a }
+    .rule { stroke: #ebebeb; stroke-opacity: .75 }
+    @media (prefers-color-scheme: light) {
+      .chip { fill: #1f2125 }
+    }
+  </style>
+  <rect class="chip" width="32" height="32" rx="7" />
+  <g fill="#f36a10">
+    <circle cx="7.8" cy="12.8" r="2.8" />
+    <circle cx="16" cy="12.8" r="2.8" />
+    <circle cx="24.2" cy="12.8" r="2.8" />
+  </g>
+  <path class="rule" d="M7.5 21h17M7.5 25.6h11.7" stroke-width="2" stroke-linecap="round" />
+</svg>

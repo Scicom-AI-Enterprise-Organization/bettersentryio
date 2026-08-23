@@ -470,7 +470,7 @@ while True:
       <section className="flex flex-wrap gap-2 border-t border-border pt-6">
         {example ? (
           <Button asChild size="sm">
-            <Link href={`/apps/${example.slug}/setup`}>
+            <Link href={`/apps/${example.slug}/settings`}>
               Snippets for {example.name}
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>

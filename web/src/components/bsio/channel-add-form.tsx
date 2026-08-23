@@ -119,21 +119,10 @@ export function ChannelAddForm({
           />
         </div>
 
+        {/* Reason on the left, actions on the right. `ml-auto` on the group rather than
+            `justify-between` on the row: when the row wraps, the buttons stay together
+            and stay right-aligned instead of one of them being flung to the far edge. */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <Button
-            type="button"
-            variant={proven ? "outline" : "default"}
-            size="sm"
-            disabled={testing || !testable}
-            onClick={runTest}
-          >
-            {proven ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
-            {testing ? "Sending…" : proven ? "Tested" : "Send test"}
-          </Button>
-          <Button type="submit" size="sm" disabled={busy || !proven || !name.trim()}>
-            <Plus className="h-3.5 w-3.5" />
-            {busy ? "Adding…" : "Add"}
-          </Button>
           {/* A disabled button with no explanation reads as a broken page. */}
           <p className="text-xs text-muted-foreground">
             {!testable
@@ -144,6 +133,22 @@ export function ChannelAddForm({
                   ? "Give it a name and it is ready to add."
                   : "Test delivered. Ready to add."}
           </p>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              type="button"
+              variant={proven ? "outline" : "default"}
+              size="sm"
+              disabled={testing || !testable}
+              onClick={runTest}
+            >
+              {proven ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
+              {testing ? "Sending…" : proven ? "Tested" : "Send test"}
+            </Button>
+            <Button type="submit" size="sm" disabled={busy || !proven || !name.trim()}>
+              <Plus className="h-3.5 w-3.5" />
+              {busy ? "Adding…" : "Add"}
+            </Button>
+          </div>
         </div>
       </form>
 

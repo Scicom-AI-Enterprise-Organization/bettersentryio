@@ -27,6 +27,9 @@ var migrationFS embed.FS
 const (
 	lockMigrate  int64 = 8930_0001
 	LockDetector int64 = 8930_0002
+	// LockRetention serialises the retention sweep across replicas: two sweepers
+	// deleting the same batches deadlock each other for no benefit.
+	LockRetention int64 = 8930_0003
 )
 
 type DB struct {
@@ -71,6 +74,49 @@ func (db *DB) WaitReady(ctx context.Context, limit time.Duration) error {
 			delay *= 2
 		}
 	}
+}
+
+// AdvisoryLock is a held session-scoped advisory lock. The lock lives on a dedicated
+// pooled connection — returned to the pool, a session lock would leak to whoever gets
+// the connection next — so Release must always be called, and releases both.
+type AdvisoryLock struct {
+	conn *pgxpool.Conn
+	key  int64
+}
+
+// TryAdvisoryLock attempts the lock without waiting. nil, nil means somebody else
+// holds it, which for every caller here is a normal outcome, not an error.
+func (db *DB) TryAdvisoryLock(ctx context.Context, key int64) (*AdvisoryLock, error) {
+	conn, err := db.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var got bool
+	if err := conn.QueryRow(ctx, `select pg_try_advisory_lock($1)`, key).Scan(&got); err != nil {
+		conn.Release()
+		return nil, err
+	}
+	if !got {
+		conn.Release()
+		return nil, nil
+	}
+	return &AdvisoryLock{conn: conn, key: key}, nil
+}
+
+// Alive reports whether the lock is still held. A session lock exists exactly as long
+// as its connection does, so a holder that never checks can lose the lock silently —
+// the database restarts, the connection drops — while continuing to act like the
+// leader. Pinging the holding connection turns that silent loss into a visible one.
+func (l *AdvisoryLock) Alive(ctx context.Context) bool {
+	return l.conn.Ping(ctx) == nil
+}
+
+// Release unlocks and returns the connection. Background context on purpose: the
+// caller's context may already be cancelled, and an unreleased advisory lock silently
+// stops every future holder.
+func (l *AdvisoryLock) Release() {
+	_, _ = l.conn.Exec(context.Background(), `select pg_advisory_unlock($1)`, l.key)
+	l.conn.Release()
 }
 
 // Migrate applies every embedded migration that has not run yet, holding an

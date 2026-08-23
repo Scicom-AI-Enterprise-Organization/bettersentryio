@@ -20,6 +20,8 @@ import (
 
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/alert"
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/api"
+	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/events"
+	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/metrics"
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/monitor"
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/store"
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/web"
@@ -191,6 +193,48 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 		return err
 	}
 	server := api.New(db, engine, detector, alerter, log.With("component", "http"), version, cfg.apiToken, cfg.baseURL, auth)
+
+	// Retention sweep: hourly, plus once shortly after boot so a freshly configured
+	// retention does not wait an hour to take effect. The sweep holds an advisory
+	// lock, so extra replicas running this loop cost one no-op query each.
+	go func() {
+		swept := metrics.NewCounterVec("bsio_retention_deleted_total",
+			"Rows removed by the retention sweep, by kind", "kind")
+		ev := events.New(db)
+		retLog := log.With("component", "retention")
+		sweep := func() {
+			sctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			defer cancel()
+			out, err := ev.SweepRetention(sctx)
+			if err != nil {
+				retLog.Error("sweep failed", "err", err)
+				return
+			}
+			swept.With("events").Add(uint64(out.Events))
+			swept.With("attachments").Add(uint64(out.Attachments))
+			swept.With("issues").Add(uint64(out.Issues))
+			if out.Events+out.Attachments+out.Issues > 0 {
+				retLog.Info("swept", "events", out.Events, "attachments", out.Attachments,
+					"issues", out.Issues, "more_pending", out.Truncated)
+			}
+		}
+		select {
+		case <-time.After(time.Minute):
+			sweep()
+		case <-ctx.Done():
+			return
+		}
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				sweep()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	httpSrv := &http.Server{
 		Addr:              cfg.listen,

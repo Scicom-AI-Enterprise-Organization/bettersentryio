@@ -43,7 +43,7 @@ accepted as `Authorization: Bearer …`, and only the first belongs in a dashboa
 |---|---|---|
 | **API token** (`bsiot_…`) | Settings → API tokens | reads only — give Grafana this |
 | operator token | `BSIO_API_TOKEN` in `.env` | everything, including deleting apps; not revocable without a redeploy |
-| an app's ingest key | Apps → the app → Setup | reads, but it exists for *writing* events and is embedded in client code |
+| an app's ingest key | Apps → the app → Settings | reads, but it exists for *writing* events and is embedded in client code |
 
 There is no scopes UI and no per-project token: a permissions subsystem is not
 something we are building (PLAN, "what it will never do"). A token reads everything or

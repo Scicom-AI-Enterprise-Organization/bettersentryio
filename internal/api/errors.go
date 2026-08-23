@@ -54,6 +54,7 @@ func (s *Server) handleIngestError(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "could not record the event")
 		return
 	}
+	ingestEvents.Inc()
 	if res.IsNew {
 		s.log.Info("new issue", "issue", res.IssueID, "culprit", res.Culprit)
 	}

@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { notFound } from "next/navigation";
+
 import { requireUser } from "@/lib/rbac";
+import { pageEnabled } from "@/lib/features";
 import { StatCard } from "@/components/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
 import {
@@ -14,7 +17,8 @@ import {
 } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ActivityBars } from "@/components/bsio/activity-bars";
-import { getOverview, monitorTone, shortDuration, uptimeLabel } from "@/lib/bsio";
+import { getOverview } from "@/lib/bsio";
+import { monitorTone, shortDuration, uptimeLabel } from "@/lib/format";
 import { Ago, ClockAt, Since } from "@/components/bsio/time";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +26,7 @@ export const revalidate = 0;
 
 export default async function MonitorsPage() {
   await requireUser();
+  if (!pageEnabled("monitors")) notFound();
   const result = await getOverview();
 
   if (!result.ok) {
