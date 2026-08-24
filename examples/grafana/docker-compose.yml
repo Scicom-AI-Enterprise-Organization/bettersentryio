@@ -11,12 +11,16 @@
 # The datasource is provisioned already; there is nothing to configure by hand.
 services:
   grafana:
-    image: grafana/grafana:11.6.0
+    # 12.3+: the custom datasource's @grafana/* dependency floor.
+    image: grafana/grafana:12.3.0
     ports:
       # 3020 because 3000/3001/3010 are usually already something else.
       - "3020:3000"
     environment:
       GF_INSTALL_PLUGINS: grafana-sentry-datasource
+      # Our own datasource is mounted from the repo, not installed from the catalog,
+      # and carries no signature — name it or Grafana refuses to load it.
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: scicom-bettersentryio-datasource
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
       # Provisioning interpolates these; the token never lands in the repo.
@@ -24,7 +28,9 @@ services:
       # Prefer a token minted in Settings → API tokens: it reads and nothing else, and
       # revoking it is one click. The operator token is the fallback so a fresh clone
       # still works, but it can also delete apps — do not leave a dashboard holding it.
-      BSIO_GRAFANA_TOKEN: ${BSIO_GRAFANA_TOKEN:-${BSIO_API_TOKEN:?set BSIO_GRAFANA_TOKEN or BSIO_API_TOKEN — see the repo root .env}}
+      # Precedence: an explicit Grafana token, then the user's minted ACCESS_TOKEN,
+      # then the operator token as the works-on-a-fresh-clone fallback.
+      BSIO_GRAFANA_TOKEN: ${BSIO_GRAFANA_TOKEN:-${ACCESS_TOKEN:-${BSIO_API_TOKEN:?set ACCESS_TOKEN or BSIO_API_TOKEN — see the repo root .env}}}
     # host.docker.internal is a Docker Desktop convenience; on Linux it does not
     # exist unless it is mapped, and the datasource URL is the one thing that has to
     # resolve or nothing works.
@@ -33,6 +39,8 @@ services:
     volumes:
       - ./provisioning:/etc/grafana/provisioning
       - ./dashboards:/var/lib/grafana/dashboards
+      # The built plugin, straight out of `npm run build` in the plugin directory.
+      - ../../scicom-bettersentryio-datasource/dist:/var/lib/grafana/plugins/scicom-bettersentryio-datasource
       - grafana_data:/var/lib/grafana
 
 volumes:

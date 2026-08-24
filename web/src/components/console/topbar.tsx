@@ -21,6 +21,9 @@ const LABELS: Record<string, string> = {
   "/admin/roles": "Roles",
   "/admin/alerts": "Alerts",
   "/admin/organization": "Organization",
+  "/admin/tokens": "API tokens",
+  "/admin/audit": "Audit log",
+  "/api-docs": "API docs",
 };
 
 function titleCase(segment: string) {

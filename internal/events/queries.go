@@ -254,7 +254,7 @@ func (s *Store) SetArchived(ctx context.Context, id int64, archived bool, until 
 	return err
 }
 
-// SetPriority stamps the triage priority ('' clears it).
+// SetPriority stamps the triage priority (” clears it).
 func (s *Store) SetPriority(ctx context.Context, id int64, priority string) error {
 	_, err := s.db.Exec(ctx, `update issues set priority = $2 where id = $1`, id, priority)
 	return err

@@ -116,10 +116,10 @@ func TestMessagesGroupAfterParameterizing(t *testing.T) {
 
 func TestParameterize(t *testing.T) {
 	cases := map[string]string{
-		"user 91 not found":                        "user <n> not found",
-		"batch 4f3a9c22 failed":                    "batch <hex> failed",
-		"missing key 'device_id'":                  "missing key <str>",
-		"at 0x7f3b2c":                              "at <addr>",
+		"user 91 not found":                          "user <n> not found",
+		"batch 4f3a9c22 failed":                      "batch <hex> failed",
+		"missing key 'device_id'":                    "missing key <str>",
+		"at 0x7f3b2c":                                "at <addr>",
 		"trace 3f2504e0-4f89-11d3-9a0c-0305e82c3301": "trace <uuid>",
 	}
 	for in, want := range cases {

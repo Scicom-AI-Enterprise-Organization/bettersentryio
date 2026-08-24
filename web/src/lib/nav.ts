@@ -1,5 +1,6 @@
 import {
   Activity,
+  Braces,
   AlertTriangle,
   BellRing,
   BookOpen,
@@ -82,17 +83,21 @@ export const SECTIONS: NavSection[] = [
     // Alerts is what people come to Settings to change; "How it works" is a manual you
     // read once, so it sits last and no longer owns the section's landing page.
     href: "/admin/alerts",
-    match: ["/profile", "/admin"],
+    match: ["/profile", "/admin", "/api-docs"],
     groups: [
       {
         label: "Alerting",
+        items: [{ label: "Alerts", href: "/admin/alerts", admin: true }],
+      },
+      {
+        label: "Account",
         items: [
-          { label: "Alerts", href: "/admin/alerts", admin: true },
+          { label: "Profile", href: "/profile" },
           { label: "API tokens", href: "/admin/tokens", admin: true },
+          { label: "API docs", href: "/api-docs" },
           { label: "Audit log", href: "/admin/audit", admin: true },
         ],
       },
-      { label: "Account", items: [{ label: "Profile", href: "/profile" }] },
       {
         label: "Organization",
         items: [
@@ -159,6 +164,7 @@ export const ITEM_ICONS: Record<string, React.ElementType> = {
   "/profile": UserCog,
   "/admin/tokens": KeyRound,
   "/admin/audit": ScrollText,
+  "/api-docs": Braces,
   "/admin/users": Users,
   "/admin/roles": ShieldCheck,
   "/admin/organization": Building2,

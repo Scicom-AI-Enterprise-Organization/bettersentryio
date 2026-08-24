@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -412,4 +413,63 @@ func (s *Server) handleProjectSeries(w http.ResponseWriter, r *http.Request) {
 		"levels":     levels,
 		"buckets":    buckets,
 	})
+}
+
+// handleEventSearch answers "which error did this request produce": lookup by
+// per-event tag (?tag=correlation_id:abc, repeatable, all must match) or by trace id
+// (?trace=…), windowed like every other read. This is the correlation workflow — the
+// id comes from a log line or a Grafana trace panel, and the answer is a deep link
+// to the issue page that explains it.
+func (s *Server) handleEventSearch(w http.ResponseWriter, r *http.Request) {
+	if !s.authorized(r) {
+		writeErr(w, http.StatusUnauthorized, "sign in, or pass a token or ingest key")
+		return
+	}
+	q := r.URL.Query()
+
+	lq := events.LookupQuery{TraceID: strings.TrimSpace(q.Get("trace"))}
+	lq.Tags = map[string]string{}
+	for _, raw := range q["tag"] {
+		if k, v, ok := strings.Cut(raw, ":"); ok && k != "" && v != "" {
+			lq.Tags[k] = v
+		}
+	}
+	if len(lq.Tags) == 0 && lq.TraceID == "" {
+		writeErr(w, http.StatusBadRequest, "pass ?tag=key:value (repeatable) or ?trace=<trace id>")
+		return
+	}
+	if slug := q.Get("project"); slug != "" {
+		id, err := s.db.ProjectIDBySlug(r.Context(), slug)
+		if err != nil {
+			s.log.Error("project lookup failed", "slug", slug, "err", err)
+			writeErr(w, http.StatusServiceUnavailable, "database unavailable")
+			return
+		}
+		if id == 0 {
+			writeErr(w, http.StatusNotFound, "no such app")
+			return
+		}
+		lq.ProjectID = id
+	}
+	lq.From, lq.To = sentryWindow(q)
+	lq.Limit, _ = strconv.Atoi(q.Get("limit"))
+
+	found, err := s.events.LookupEvents(r.Context(), lq)
+	if err != nil {
+		s.log.Error("event search failed", "err", err)
+		writeErr(w, http.StatusServiceUnavailable, "could not search events")
+		return
+	}
+
+	// The URL is built server-side so every consumer (the plugin, curl, the UI)
+	// deep-links the same way: to the issue page, opened at this exact event.
+	type hit struct {
+		events.FoundEvent
+		URL string `json:"url"`
+	}
+	out := make([]hit, 0, len(found))
+	for _, f := range found {
+		out = append(out, hit{f, fmt.Sprintf("%s/apps/%s/errors/%d?event=%d", s.baseURL, f.Project, f.IssueID, f.ID)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": out})
 }

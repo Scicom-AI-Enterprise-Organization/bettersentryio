@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "datasource",
+  "name": "bettersentryio",
+  "id": "scicom-bettersentryio-datasource",
+  "metrics": true,
+  "backend": false,
+  "info": {
+    "description": "Errors, heartbeat monitors, incidents and correlation-id lookup from a bettersentryio engine",
+    "author": {
+      "name": "Scicom"
+    },
+    "keywords": [
+      "datasource",
+      "errors",
+      "monitoring",
+      "bettersentryio"
+    ],
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [],
+    "screenshots": [],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=12.3.0",
+    "plugins": []
+  },
+  "routes": [
+    {
+      "path": "engine",
+      "url": "{{ .JsonData.url }}",
+      "headers": [
+        {
+          "name": "Authorization",
+          "content": "Bearer {{ .SecureJsonData.apiToken }}"
+        }
+      ]
+    }
+  ]
+}

@@ -192,6 +192,7 @@ func (s *Server) Handler(ui interface{ Routes(*http.ServeMux) }) http.Handler {
 	mux.HandleFunc("GET /api/0/issues/{id}/series", s.handleIssueSeries)
 	mux.HandleFunc("GET /api/0/analytics", s.handleProjectAnalytics)
 	mux.HandleFunc("GET /api/0/releases", s.handleReleases)
+	mux.HandleFunc("GET /api/0/events/search", s.handleEventSearch)
 	mux.HandleFunc("GET /api/0/events/{uuid}/attachments", s.handleEventAttachments)
 	mux.HandleFunc("GET /api/0/attachments/{id}", s.handleAttachmentDownload)
 	// The Sentry Web API reads (internal/api/sentryweb.go): the endpoints Sentry's

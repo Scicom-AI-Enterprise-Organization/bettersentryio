@@ -133,11 +133,11 @@ type Frame struct {
 }
 
 type Exception struct {
-	Type       string  `json:"type"`
-	Value      string  `json:"value"`
-	Module     string  `json:"module"`
-	Stacktrace *Stack  `json:"stacktrace"`
-	Mechanism  *Mech   `json:"mechanism,omitempty"`
+	Type       string `json:"type"`
+	Value      string `json:"value"`
+	Module     string `json:"module"`
+	Stacktrace *Stack `json:"stacktrace"`
+	Mechanism  *Mech  `json:"mechanism,omitempty"`
 }
 
 type Stack struct {

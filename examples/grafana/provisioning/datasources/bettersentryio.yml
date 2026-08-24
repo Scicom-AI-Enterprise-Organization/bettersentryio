@@ -8,11 +8,25 @@
 apiVersion: 1
 
 datasources:
+  # The native datasource: typed frames, monitors/incidents, correlation-id lookup.
+  - name: bettersentryio-native
+    type: scicom-bettersentryio-datasource
+    uid: bsio-native
+    access: proxy
+    isDefault: true
+    jsonData:
+      url: ${BSIO_API_URL}
+    secureJsonData:
+      apiToken: ${BSIO_GRAFANA_TOKEN}
+
+  # The official Sentry datasource. Name and uid unchanged from before the native
+  # plugin existed: the provisioner matches rows by name, and renaming a provisioned
+  # datasource in place is a "data source not found" crash-loop (measured).
   - name: bettersentryio
     type: grafana-sentry-datasource
     uid: bettersentryio
     access: proxy
-    isDefault: true
+    isDefault: false
     jsonData:
       url: ${BSIO_API_URL}
       orgSlug: bettersentryio

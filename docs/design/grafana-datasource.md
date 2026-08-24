@@ -1,11 +1,61 @@
-# Grafana, through the official Sentry datasource
+# Grafana
 
-**There is no bettersentryio Grafana plugin, and there will not be one.** The engine
-answers Sentry's *Web* API, so [grafana-sentry-datasource][ds] — Grafana Labs' own,
-signed, maintained plugin — queries us unmodified. This is D14's bargain applied to
-the read side: the SDKs needed no code change, and neither do dashboards.
+Two ways in, and the recommendation reversed once we had used both:
+
+1. **`scicom-bettersentryio-datasource` — ours, and the default.** Typed frames
+   (counts are numbers, timestamps are time fields), heartbeat monitors and incidents
+   as first-class query types, the analytics leaderboard, and lookup by
+   correlation/trace id with deep links back into the UI. Lives in
+   [`scicom-bettersentryio-datasource/`](../../scicom-bettersentryio-datasource/).
+2. **[grafana-sentry-datasource][ds] — the compatibility path.** The engine answers
+   Sentry's *Web* API, so Grafana Labs' plugin works unmodified. Kept provisioned for
+   anything built on it, and as proof the compat surface holds.
+
+The original position here was "there is no bettersentryio plugin and there will not
+be one". Reversed deliberately (2026-08-24) after real use: the Sentry datasource
+returns issue counts as strings, needs an `organize` transformation to make its
+35-field frames readable, speaks in org slugs and Discover, and has no notion of the
+flagship data — monitors, beats, incidents. Compatibility is a fine floor and a bad
+ceiling.
 
 [ds]: https://grafana.com/grafana/plugins/grafana-sentry-datasource/
+
+## The native datasource
+
+Frontend-only on purpose: queries run in the browser and reach the engine through
+Grafana's **data proxy** (the `engine` route in `plugin.json`), which attaches the
+API token server-side — the browser never holds the credential and there is no Go
+binary to build per platform or sign. The one capability that costs is
+Grafana-managed alert rules (they need a backend plugin), and it costs nothing here:
+bettersentryio is itself the alerter.
+
+Query types: `events` (per-level, zero-filled series), `issues`, `monitors` (from
+`/api/0/overview` — the wall endpoint is a leaner shape), `incidents`, `topIssues`,
+and `lookup` (`?tag=correlation_id:…` / `?trace=…` against per-event identity,
+GIN-indexed, with an "Open in bettersentryio" data link on every hit). Dashboard
+variables interpolate in the lookup fields, so a textbox variable drives the panel.
+
+Build and run:
+
+```bash
+cd scicom-bettersentryio-datasource
+npm install && npm run build        # → dist/, which the compose file mounts
+```
+
+`examples/grafana/docker-compose.yml` mounts `dist/`, allows the unsigned plugin id,
+and provisions the datasource (`uid: bsio-native`, default) with
+`BSIO_GRAFANA_TOKEN`/`ACCESS_TOKEN` from the repo-root `.env`. Grafana must be
+**≥ 12.3** (the scaffold's dependency floor). The `bettersentryio — native` dashboard
+is provisioned alongside the sentry-compat one.
+
+Two provisioning traps, both measured:
+- **Never rename a provisioned datasource in place.** The provisioner matches rows by
+  name; a name pointing at a new uid/type is a "data source not found" crash-loop on
+  a volume that already holds the old row. New identity → new name.
+- **A frontend datasource cannot be verified through `/api/ds/query`** — that path is
+  backend-only. Queries run in the browser, so only a browser proves them.
+
+## The sentry-compat path
 
 ```
 sentry_sdk ──envelope──▶ ┌─────────────────┐ ◀──/api/0/organizations/…── grafana-sentry-datasource

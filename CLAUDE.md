@@ -202,6 +202,23 @@ breakdowns, an environment × level cross-tab, and a top-10 leaderboard. Read-on
   to the ingress. Register gauges with closures over live values; never maintain a
   stored copy.
 
+## The Grafana plugin (`scicom-bettersentryio-datasource/`)
+
+Our own datasource, frontend-only: the token rides Grafana's data proxy (`routes` in
+plugin.json), so there is no backend binary and no Grafana-managed alerting — which is
+fine, the engine alerts. Rules that bite:
+
+- `npm run build` in the plugin dir after any src change; the compose stack mounts
+  `dist/` directly. `tsc --noEmit` there too — webpack uses swc and does NOT typecheck.
+- **A frontend datasource cannot be tested via `/api/ds/query`** (backend-only path).
+  Queries run in the browser; only Playwright against a dashboard proves them.
+- **Never rename a provisioned datasource in place** — the provisioner matches by
+  name, and a kept name with a new uid/type crash-loops Grafana on an existing volume.
+- The scaffold's own agent instructions live in `scicom-bettersentryio-datasource/.config/AGENTS/` —
+  read them before touching build config; `.config/` itself is generated, never edited.
+- Monitors come from `/api/0/overview`, not `/api/0/monitors` — the wall endpoint is a
+  leaner shape keyed `monitor` with no app/uptime fields (measured as two empty columns).
+
 ## UI conventions
 
 Beyond the visual rules in [DEVELOPING.md](DEVELOPING.md) (dark default, status tokens

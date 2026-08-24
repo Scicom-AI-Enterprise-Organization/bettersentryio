@@ -96,8 +96,10 @@ up() {
     say "building engine"
     go build -o bin/bettersentryio ./cmd/bettersentryio || { fail "build failed"; return 1; }
     say "starting engine on :$ENGINE_PORT"
+    # base-url is where deep links (alerts, /events/search) send people: the UI,
+    # not the engine port.
     nohup ./bin/bettersentryio serve --tick-interval 5s \
-      --base-url "http://localhost:$ENGINE_PORT" >"$ENGINE_LOG" 2>&1 &
+      --base-url "http://localhost:$WEB_PORT" >"$ENGINE_LOG" 2>&1 &
     wait_http "http://localhost:$ENGINE_PORT/-/health" 30 ||
       { fail "engine unhealthy — see $ENGINE_LOG"; tail -3 "$ENGINE_LOG"; return 1; }
   fi

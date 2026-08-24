@@ -1,0 +1,343 @@
+{
+  "uid": "bsio-native",
+  "title": "bettersentryio \u2014 native",
+  "tags": [
+    "bettersentryio"
+  ],
+  "timezone": "browser",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "editable": true,
+  "templating": {
+    "list": [
+      {
+        "name": "correlation_id",
+        "label": "correlation id",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "value": ""
+        }
+      },
+      {
+        "name": "trace_id",
+        "label": "trace id",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "value": ""
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Events over time \u2014 default app",
+      "type": "timeseries",
+      "datasource": {
+        "type": "scicom-bettersentryio-datasource",
+        "uid": "bsio-native"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 14,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "scicom-bettersentryio-datasource",
+            "uid": "bsio-native"
+          },
+          "kind": "events",
+          "app": "default"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "warning"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Monitors",
+      "type": "table",
+      "datasource": {
+        "type": "scicom-bettersentryio-datasource",
+        "uid": "bsio-native"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 10,
+        "x": 14,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "scicom-bettersentryio-datasource",
+            "uid": "bsio-native"
+          },
+          "kind": "monitors"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "uptime %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 100
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "status",
+            "desc": true
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "title": "Issues \u2014 default app",
+      "type": "table",
+      "datasource": {
+        "type": "scicom-bettersentryio-datasource",
+        "uid": "bsio-native"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 14,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "scicom-bettersentryio-datasource",
+            "uid": "bsio-native"
+          },
+          "kind": "issues",
+          "app": "default"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "events"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "issue"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 420
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "events",
+            "desc": true
+          }
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "title": "Top issues in this window",
+      "type": "table",
+      "datasource": {
+        "type": "scicom-bettersentryio-datasource",
+        "uid": "bsio-native"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 10,
+        "x": 14,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "scicom-bettersentryio-datasource",
+            "uid": "bsio-native"
+          },
+          "kind": "topIssues",
+          "app": "default"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Incidents",
+      "type": "table",
+      "datasource": {
+        "type": "scicom-bettersentryio-datasource",
+        "uid": "bsio-native"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 0,
+        "y": 19
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "scicom-bettersentryio-datasource",
+            "uid": "bsio-native"
+          },
+          "kind": "incidents"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Find event by correlation / trace id",
+      "type": "table",
+      "datasource": {
+        "type": "scicom-bettersentryio-datasource",
+        "uid": "bsio-native"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 14,
+        "y": 19
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "scicom-bettersentryio-datasource",
+            "uid": "bsio-native"
+          },
+          "kind": "lookup",
+          "tagKey": "correlation_id",
+          "tagValue": "$correlation_id",
+          "trace": "$trace_id"
+        }
+      ],
+      "description": "Type an id into the dashboard variables above. The issue column links into bettersentryio."
+    }
+  ]
+}
