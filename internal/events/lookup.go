@@ -40,6 +40,41 @@ type LookupQuery struct {
 	Limit    int
 }
 
+// lookupWhere builds the WHERE clause for one LookupQuery.
+//
+// The identity predicates come first because they are the query: the caller holds an
+// exact id. The time window is *optional* — zero From/To adds no received_at bounds.
+// Windowing an identity lookup can only create false negatives, and the measured one
+// is Grafana's correlation click: a trace six hours old, an Explore range of one
+// hour, and an "empty" result for an event that exists. Skipping the bounds is safe
+// precisely because identity is mandatory — the GIN / trace-id predicates carry the
+// query, so no window never means a table scan.
+func lookupWhere(q LookupQuery, args *[]any) (string, error) {
+	where := "true"
+	if len(q.Tags) > 0 {
+		// One containment test for all pairs: @> is what the jsonb_path_ops GIN
+		// index answers, where per-key ->> extraction would not use it.
+		blob, err := json.Marshal(q.Tags)
+		if err != nil {
+			return "", err
+		}
+		where += " and e.payload -> 'tags' @> " + arg(args, string(blob)) + "::jsonb"
+	}
+	if q.TraceID != "" {
+		where += " and e.payload -> 'contexts' -> 'trace' ->> 'trace_id' = " + arg(args, q.TraceID)
+	}
+	if q.ProjectID != 0 {
+		where += " and i.project_id = " + arg(args, q.ProjectID)
+	}
+	if !q.From.IsZero() {
+		where += " and e.received_at >= " + arg(args, q.From)
+	}
+	if !q.To.IsZero() {
+		where += " and e.received_at < " + arg(args, q.To)
+	}
+	return where, nil
+}
+
 // LookupEvents finds events by per-event identity. At least one of Tags/TraceID is
 // required — an unfiltered dump is not a search, and would be a payload-sized table
 // scan besides.
@@ -52,21 +87,9 @@ func (s *Store) LookupEvents(ctx context.Context, q LookupQuery) ([]FoundEvent, 
 	}
 
 	args := []any{}
-	where := "e.received_at >= " + arg(&args, q.From) + " and e.received_at < " + arg(&args, q.To)
-	if q.ProjectID != 0 {
-		where += " and i.project_id = " + arg(&args, q.ProjectID)
-	}
-	if len(q.Tags) > 0 {
-		// One containment test for all pairs: @> is what the jsonb_path_ops GIN
-		// index answers, where per-key ->> extraction would not use it.
-		blob, err := json.Marshal(q.Tags)
-		if err != nil {
-			return nil, err
-		}
-		where += " and e.payload -> 'tags' @> " + arg(&args, string(blob)) + "::jsonb"
-	}
-	if q.TraceID != "" {
-		where += " and e.payload -> 'contexts' -> 'trace' ->> 'trace_id' = " + arg(&args, q.TraceID)
+	where, err := lookupWhere(q, &args)
+	if err != nil {
+		return nil, err
 	}
 
 	rows, err := s.db.Query(ctx, `

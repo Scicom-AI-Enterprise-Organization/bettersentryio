@@ -171,12 +171,18 @@ export class BsioDataSource extends DataSourceApi<BsioQuery, BsioDataSourceOptio
       }
 
       case 'lookup': {
-        const tagValue = interp(q.tagValue);
-        const trace = interp(q.trace);
+        // Trimmed because these ids are pasted — from a log line, a Grafana cell, a
+        // ticket — and a trailing space makes an exact-match search silently empty.
+        const tagValue = interp(q.tagValue)?.trim();
+        const trace = interp(q.trace)?.trim();
         if (!tagValue && !trace) {
           return []; // nothing to look up yet — an empty editor is not an error
         }
-        const params: Record<string, unknown> = { ...window, limit: q.limit ?? 100 };
+        // Deliberately NOT windowed by the panel's time range. The id is exact, and
+        // the person pasting it rarely knows when the event happened — that is why
+        // they are looking it up. A window here turned the trace-correlation click
+        // into "no data" for any trace older than the pane's range (measured).
+        const params: Record<string, unknown> = { limit: q.limit ?? 100 };
         if (tagValue) {
           params.tag = `${q.tagKey || 'correlation_id'}:${tagValue}`;
         }
@@ -202,6 +208,51 @@ export class BsioDataSource extends DataSourceApi<BsioQuery, BsioDataSourceOptio
         if (issueField) {
           issueField.config = {
             links: [{ title: 'Open in bettersentryio', url: '${__data.fields.url}', targetBlank: true }],
+          };
+        }
+        return [frame];
+      }
+
+      case 'eventDetail': {
+        const tagValue = interp(q.tagValue)?.trim();
+        const trace = interp(q.trace)?.trim();
+        if (!tagValue && !trace) {
+          return [];
+        }
+        // Unwindowed for the same reason as lookup: identity, not time, is the query.
+        const params: Record<string, unknown> = { limit: 1 };
+        if (tagValue) {
+          params.tag = `${q.tagKey || 'correlation_id'}:${tagValue}`;
+        }
+        if (trace) {
+          params.trace = trace;
+        }
+        if (q.app) {
+          params.project = q.app;
+        }
+        const found = await this.get<{ events: Found[] & Array<{ id: number; issue_id: number }> }>(
+          '/api/0/events/search',
+          params
+        );
+        if (found.events.length === 0) {
+          return [];
+        }
+        const hit = found.events[0];
+        const detail = await this.get<{ payload: EventPayload }>(
+          `/api/0/issues/${hit.issue_id}/events/${hit.id}`,
+          {}
+        );
+        const rows = flattenEvent(detail.payload);
+        const frame = tableFrame(q.refId, rows, [
+          { name: 'section', type: FieldType.string, of: (r: DetailRow) => r.section },
+          { name: 'key', type: FieldType.string, of: (r) => r.key },
+          { name: 'value', type: FieldType.string, of: (r) => r.value },
+        ]);
+        frame.name = `${hit.issue_title} — ${hit.url}`;
+        const section = frame.fields.find((f) => f.name === 'section');
+        if (section) {
+          section.config = {
+            links: [{ title: 'Open in bettersentryio', url: hit.url, targetBlank: true }],
           };
         }
         return [frame];
@@ -294,6 +345,8 @@ type Incident = {
 };
 
 type Found = {
+  id: number;
+  issue_id: number;
   received_at: string;
   issue_title: string;
   level: string;
@@ -302,3 +355,116 @@ type Found = {
   event_id: string;
   url: string;
 };
+
+
+/* ---- event anatomy -------------------------------------------------------------
+ * Mirrors the sections of the issue page: exception, highlights, per-name contexts,
+ * additional data (extra), packages (modules), tags. One row per fact, because a
+ * Grafana table is rows — nesting has to become geography.
+ */
+
+type DetailRow = { section: string; key: string; value: string };
+
+type EventPayload = {
+  level?: string;
+  environment?: string;
+  release?: string;
+  server_name?: string;
+  transaction?: string;
+  platform?: string;
+  event_id?: string;
+  timestamp?: number | string;
+  exception?: { values?: ExceptionValue[] };
+  contexts?: Record<string, Record<string, unknown>>;
+  extra?: Record<string, unknown>;
+  modules?: Record<string, string>;
+  tags?: Record<string, string>;
+  request?: { method?: string; url?: string };
+  sdk?: { name?: string; version?: string };
+};
+
+type ExceptionValue = {
+  type?: string;
+  value?: string;
+  module?: string;
+  mechanism?: { type?: string; handled?: boolean };
+  stacktrace?: { frames?: Frame[] };
+};
+
+type Frame = { filename?: string; function?: string; lineno?: number; in_app?: boolean };
+
+function compact(v: unknown): string {
+  if (v === null || v === undefined) {
+    return '';
+  }
+  if (typeof v === 'string') {
+    return v;
+  }
+  const s = JSON.stringify(v);
+  return s.length > 300 ? s.slice(0, 300) + '…' : s;
+}
+
+export function flattenEvent(p: EventPayload): DetailRow[] {
+  const rows: DetailRow[] = [];
+  const add = (section: string, key: string, value: unknown) => {
+    const v = compact(value);
+    if (v !== '') {
+      rows.push({ section, key, value: v });
+    }
+  };
+
+  // Exception first — it is what the person came for. Deepest frame last, the way
+  // Python prints it, in-app frames marked.
+  for (const exc of p.exception?.values ?? []) {
+    const section = exc.type || 'exception';
+    add(section, 'value', exc.value);
+    add(section, 'module', exc.module);
+    if (exc.mechanism) {
+      add(section, 'mechanism', `${exc.mechanism.type ?? ''}${exc.mechanism.handled === false ? ' (unhandled)' : ''}`);
+    }
+    for (const f of exc.stacktrace?.frames ?? []) {
+      add(
+        section,
+        `${f.in_app ? '→' : ' '} ${f.function ?? '?'}`,
+        `${f.filename ?? '?'}:${f.lineno ?? '?'}`
+      );
+    }
+  }
+
+  // Highlights: the header chips off the issue page.
+  add('highlights', 'level', p.level);
+  add('highlights', 'environment', p.environment);
+  add('highlights', 'release', p.release);
+  add('highlights', 'server_name', p.server_name);
+  add('highlights', 'transaction', p.transaction);
+  add('highlights', 'platform', p.platform);
+  if (p.request?.url) {
+    add('highlights', 'request', `${p.request.method ?? 'GET'} ${p.request.url}`);
+  }
+  if (p.sdk?.name) {
+    add('highlights', 'sdk', `${p.sdk.name} ${p.sdk.version ?? ''}`);
+  }
+  add('highlights', 'event_id', p.event_id);
+
+  // Every context by name — trace is the one people look for.
+  for (const [name, ctx] of Object.entries(p.contexts ?? {})) {
+    for (const [k, v] of Object.entries(ctx ?? {})) {
+      add(`context — ${name}`, k, v);
+    }
+  }
+
+  for (const [k, v] of Object.entries(p.tags ?? {})) {
+    add('tags', k, v);
+  }
+
+  for (const [k, v] of Object.entries(p.extra ?? {})) {
+    add('additional data', k, v);
+  }
+
+  // "packages" on the issue page is the installed modules list, not sdk.packages.
+  for (const [k, v] of Object.entries(p.modules ?? {})) {
+    add('packages', k, v);
+  }
+
+  return rows;
+}

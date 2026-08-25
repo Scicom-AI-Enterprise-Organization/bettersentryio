@@ -338,6 +338,71 @@
         }
       ],
       "description": "Type an id into the dashboard variables above. The issue column links into bettersentryio."
+    },
+    {
+      "id": 7,
+      "title": "Event detail \u2014 newest match for the ids above",
+      "type": "table",
+      "datasource": {
+        "type": "scicom-bettersentryio-datasource",
+        "uid": "bsio-native"
+      },
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "description": "The full anatomy of the newest event matching the correlation/trace id: exception with stacktrace, highlights, every context (trace included), additional data, and installed packages. The section column links into bettersentryio.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "scicom-bettersentryio-datasource",
+            "uid": "bsio-native"
+          },
+          "kind": "eventDetail",
+          "tagKey": "correlation_id",
+          "tagValue": "$correlation_id",
+          "trace": "$trace_id"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "section"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "key"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 320
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      }
     }
   ]
 }

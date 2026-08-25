@@ -430,8 +430,13 @@ func (s *Server) handleEventSearch(w http.ResponseWriter, r *http.Request) {
 	lq := events.LookupQuery{TraceID: strings.TrimSpace(q.Get("trace"))}
 	lq.Tags = map[string]string{}
 	for _, raw := range q["tag"] {
-		if k, v, ok := strings.Cut(raw, ":"); ok && k != "" && v != "" {
-			lq.Tags[k] = v
+		// Trimmed because these ids are pasted -- from a log line, a Grafana cell, a
+		// ticket -- and a trailing space makes an exact-match search silently empty.
+		if k, v, ok := strings.Cut(raw, ":"); ok {
+			k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+			if k != "" && v != "" {
+				lq.Tags[k] = v
+			}
 		}
 	}
 	if len(lq.Tags) == 0 && lq.TraceID == "" {
@@ -451,7 +456,12 @@ func (s *Server) handleEventSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		lq.ProjectID = id
 	}
-	lq.From, lq.To = sentryWindow(q)
+	// Windowed only when the caller asked for a window. An identity lookup with no
+	// bounds must search all of history: the person pasting a trace id does not know
+	// when the event happened -- that is usually why they are looking it up.
+	if q.Get("start") != "" || q.Get("end") != "" || q.Get("statsPeriod") != "" {
+		lq.From, lq.To = sentryWindow(q)
+	}
 	lq.Limit, _ = strconv.Atoi(q.Get("limit"))
 
 	found, err := s.events.LookupEvents(r.Context(), lq)

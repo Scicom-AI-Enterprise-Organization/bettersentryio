@@ -31,9 +31,22 @@ bettersentryio is itself the alerter.
 
 Query types: `events` (per-level, zero-filled series), `issues`, `monitors` (from
 `/api/0/overview` — the wall endpoint is a leaner shape), `incidents`, `topIssues`,
-and `lookup` (`?tag=correlation_id:…` / `?trace=…` against per-event identity,
-GIN-indexed, with an "Open in bettersentryio" data link on every hit). Dashboard
-variables interpolate in the lookup fields, so a textbox variable drives the panel.
+`lookup` (`?tag=correlation_id:…` / `?trace=…` against per-event identity,
+GIN-indexed, with an "Open in bettersentryio" data link on every hit), and
+`eventDetail` — the full anatomy of the newest matching event as section/key/value
+rows: exception with stacktrace, highlights, every context (trace included),
+additional data, and installed packages, i.e. what the issue page shows, inside
+Grafana. Dashboard variables interpolate in the identity fields, so a textbox
+variable drives both the lookup table and the detail panel.
+
+`lookup` and `eventDetail` ignore the panel's time range, and the engine leaves an
+unwindowed identity search unwindowed (2026-08-25; both ends measured). The id is
+exact, and the person pasting it rarely knows when the event happened — that is why
+they are looking it up. Windowed, the trace-correlation click answered "no data" for
+any trace older than the pane's range, which reads as "not in Sentry" when the truth
+is "not in the last hour". An explicit `start`/`end` on the API is still honoured.
+Both ends also trim pasted ids: a trailing space from a log line or a Grafana cell
+made an exact-match search silently empty.
 
 Build and run:
 

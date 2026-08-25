@@ -12,7 +12,8 @@ export type QueryKind =
   | 'monitors' // every heartbeat monitor and its state — the flagship data
   | 'incidents' // the incident log
   | 'topIssues' // the leaderboard from /api/0/analytics
-  | 'lookup'; // correlation id / trace id → the exact events
+  | 'lookup' // correlation id / trace id → the exact events
+  | 'eventDetail'; // the full anatomy of the newest matching event
 
 export interface BsioQuery extends DataQuery {
   kind: QueryKind;

@@ -15,7 +15,15 @@ const KINDS: Array<SelectableValue<QueryKind>> = [
   { value: 'incidents', label: 'Incidents', description: 'The incident log' },
   { value: 'topIssues', label: 'Top issues', description: 'The leaderboard for the window' },
   { value: 'lookup', label: 'Find by correlation / trace id', description: 'Per-event identity search' },
+  {
+    value: 'eventDetail',
+    label: 'Event detail',
+    description: 'Exception, highlights, trace context, additional data, packages — for the newest matching event',
+  },
 ];
+
+/** The kinds that identify an event by tag / trace id and share the lookup row. */
+const IDENTITY_KINDS: QueryKind[] = ['lookup', 'eventDetail'];
 
 const NEEDS_APP: QueryKind[] = ['events', 'issues', 'topIssues'];
 
@@ -51,18 +59,18 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
         <InlineField label="Query" labelWidth={12}>
           <Select width={34} options={KINDS} value={kind} onChange={(v) => set({ kind: v.value! })} />
         </InlineField>
-        {(NEEDS_APP.includes(kind) || kind === 'lookup') && (
+        {(NEEDS_APP.includes(kind) || IDENTITY_KINDS.includes(kind)) && (
           <InlineField
             label="App"
             labelWidth={8}
-            tooltip={kind === 'lookup' ? 'Optional: a correlation id is searched across every app by default' : undefined}
+            tooltip={IDENTITY_KINDS.includes(kind) ? 'Optional: an id is searched across every app by default' : undefined}
           >
             <Combobox
               width={28}
               options={apps}
               value={query.app ?? null}
-              isClearable={kind === 'lookup'}
-              placeholder={kind === 'lookup' ? 'all apps' : 'select an app'}
+              isClearable={IDENTITY_KINDS.includes(kind)}
+              placeholder={IDENTITY_KINDS.includes(kind) ? 'all apps' : 'select an app'}
               onChange={(v: ComboboxOption | null) => set({ app: v?.value })}
             />
           </InlineField>
@@ -74,7 +82,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
         )}
       </InlineFieldRow>
 
-      {kind === 'lookup' && (
+      {IDENTITY_KINDS.includes(kind) && (
         <InlineFieldRow>
           <InlineField label="Tag" labelWidth={12} tooltip="Per-event tag key; correlation_id is what a log line hands you">
             <Input
