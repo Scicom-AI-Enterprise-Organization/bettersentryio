@@ -1,0 +1,111 @@
+# Mirror a released image into the CAE SWR registry.
+#
+# build.yml pushes to ECR, which cce-ucc-stgg cannot pull from — CCE is TMOne
+# AlphaEdge, a different cloud, and the estate's registry there is SWR. So a release
+# is not deployable on staging until it has been copied across.
+#
+# Only tagged releases are mirrored. `main-<sha>` and `latest` stay ECR-only, matching
+# build.yml's rule that only a semver tag is deployable, and matching what the
+# ImageUpdater in ucc_argocd-infratools-cae-stgg allows (^v[0-9]+\.[0-9]+\.[0-9]+$).
+#
+# Once the tag lands in SWR, argocd-image-updater writes it into
+# apps/bettersentryio/kustomization.yaml on that repo's main and ArgoCD rolls it out.
+
+name: mirror to SWR
+
+on:
+  workflow_run:
+    workflows: [build]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to mirror, e.g. v0.1.28"
+        required: true
+
+permissions:
+  contents: read
+  id-token: write # OIDC, to read from ECR
+  actions: read # to inspect the triggering run
+
+concurrency:
+  group: mirror-swr-${{ github.event.inputs.version || github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-5
+  ECR: 865626945255.dkr.ecr.ap-southeast-5.amazonaws.com
+  ROLE_ARN: arn:aws:iam::865626945255:role/AIES-Bettersentryio-ECRAccessRole
+  SWR_ORG: ucc-devl
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Work out which tag to mirror
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            # build.yml runs on every push to main too. Only the ones that carry a
+            # release tag are deployable, so anything else is nothing to do.
+            version=$(git tag --points-at "${{ github.event.workflow_run.head_sha }}" \
+                      | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+            if [ -z "$version" ]; then
+              echo "No release tag on this commit — nothing to mirror."
+              echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Install skopeo
+        if: steps.version.outputs.skip != 'true'
+        run: sudo apt-get update && sudo apt-get install -y skopeo
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.version.outputs.skip != 'true'
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-bettersentryio-mirror
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        if: steps.version.outputs.skip != 'true'
+        id: ecr
+
+      - name: Copy both images
+        if: steps.version.outputs.skip != 'true'
+        env:
+          V: ${{ steps.version.outputs.version }}
+          SWR_REGISTRY: ${{ secrets.CCE_REGISTRY }}
+          SWR_USERNAME: ${{ secrets.CCE_USERNAME }}
+          SWR_PASSWORD: ${{ secrets.CCE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # build.yml publishes an OCI image index (amd64 + arm64). SWR accepts only
+          # Docker v2 schema 2, and every node on cce-ucc-stgg is amd64 — so pick that
+          # variant out of the index and land a plain manifest. --override-arch is what
+          # selects it; --format v2s2 converts the media type on the way out.
+          for pair in "scicom/bettersentryio:bettersentryio" \
+                      "scicom/bettersentryio-web:bettersentryio-web"; do
+            src="${pair%%:*}"; dst="${pair##*:}"
+            echo "::group::$src -> $SWR_REGISTRY/$SWR_ORG/$dst:$V"
+            skopeo copy --override-arch amd64 --override-os linux --format v2s2 \
+              --src-creds "AWS:$(aws ecr get-login-password --region "$AWS_REGION")" \
+              --dest-creds "$SWR_USERNAME:$SWR_PASSWORD" \
+              "docker://$ECR/$src:$V" \
+              "docker://$SWR_REGISTRY/$SWR_ORG/$dst:$V"
+            echo "::endgroup::"
+          done
+          echo "Mirrored $V. argocd-image-updater on cce-ucc-stgg picks it up from here."
