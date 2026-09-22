@@ -95,9 +95,10 @@ jobs:
           # and is neither. A single-platform build wants a plain manifest.
           provenance: false
           sbom: false
+          # vapt-* tags are VAPT builds: never move :latest onto them.
           tags: |
             ${{ env.REGISTRY }}/${{ matrix.repo }}:${{ steps.version.outputs.version }}
-            ${{ env.REGISTRY }}/${{ matrix.repo }}:latest
+            ${{ !startsWith(steps.version.outputs.version, 'vapt-') && format('{0}/{1}:latest', env.REGISTRY, matrix.repo) || '' }}
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
             APP_VERSION=${{ steps.version.outputs.version }}
