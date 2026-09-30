@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -256,22 +257,7 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 		}
 	}()
 
-	// Every phase of a connection is bounded (VAPT SAST #40): without ReadTimeout a
-	// client could trickle a 20 MB envelope body forever, and without IdleTimeout a
-	// kept-alive connection never closed. 64 KiB of request line + headers also bounds
-	// how many ?tag= / field= / search terms one query can pile into its SQL.
-	httpSrv := &http.Server{
-		Addr:              cfg.listen,
-		Handler:           server.Handler(ui),
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       60 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       90 * time.Second,
-		MaxHeaderBytes:    64 << 10,
-		// Only used with --tls-cert-file. TLS 1.2 is the floor; Go's default suites
-		// for 1.2 are already AEAD-only.
-		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-	}
+	httpSrv := newHTTPServer(cfg.listen, server.Handler(ui))
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -279,18 +265,11 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 	go func() { defer wg.Done(); detector.Run(ctx) }()
 
 	errCh := make(chan error, 1)
-	// Plain HTTP is the default because every deployment so far terminates TLS at the
-	// edge (Envoy / ALB) and reaches the engine over the cluster network. VAPT SAST #50
-	// flagged that as plaintext transport: --tls-cert-file closes the last hop too, for
-	// installs where the network between edge and engine is not trusted.
 	go func() {
-		var err error
-		if cfg.tlsCert != "" {
-			log.Info("listening", "addr", cfg.listen, "tls", true, "version", version)
-			err = httpSrv.ListenAndServeTLS(cfg.tlsCert, cfg.tlsKey)
-		} else {
-			log.Info("listening", "addr", cfg.listen, "tls", false, "version", version)
-			err = httpSrv.ListenAndServe()
+		ln, err := net.Listen("tcp", cfg.listen)
+		if err == nil {
+			log.Info("listening", "addr", cfg.listen, "tls", cfg.tlsCert != "", "version", version)
+			err = serve(httpSrv, ln, cfg.tlsCert, cfg.tlsKey)
 		}
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
@@ -318,6 +297,37 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 	wg.Wait()
 	log.Info("stopped cleanly")
 	return nil
+}
+
+// newHTTPServer bounds every phase of a connection (VAPT SAST #40): without
+// ReadTimeout a client could trickle a 20 MB envelope body forever, and without
+// IdleTimeout a kept-alive connection never closed. 64 KiB of request line + headers
+// also bounds how many ?tag= / field= / search terms one query can pile into its SQL.
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       90 * time.Second,
+		MaxHeaderBytes:    64 << 10,
+		// Only used with --tls-cert-file. TLS 1.2 is the floor; Go's default suites
+		// for 1.2 are already AEAD-only.
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+	}
+}
+
+// serve answers on ln: HTTPS when certFile is set, plain HTTP otherwise. Plain HTTP is
+// the default because every deployment so far terminates TLS at the edge (Envoy / ALB)
+// and reaches the engine over the cluster network. VAPT SAST #50 flagged that as
+// plaintext transport: --tls-cert-file closes the last hop too, for installs where
+// the network between edge and engine is not trusted.
+func serve(srv *http.Server, ln net.Listener, certFile, keyFile string) error {
+	if certFile != "" {
+		return srv.ServeTLS(ln, certFile, keyFile)
+	}
+	return srv.Serve(ln)
 }
 
 // printFirstBootHelp prints a copy-pasteable beat command once, on the boot that
