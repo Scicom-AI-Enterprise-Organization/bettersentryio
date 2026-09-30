@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -61,6 +62,8 @@ func main() {
 		apiToken      = fs.String("api-token", os.Getenv("BSIO_API_TOKEN"), "operator token for the admin API (create/delete apps, mute). Unset: any ingest key is accepted, which is development-only")
 		apiTokenFile  = fs.String("api-token-file", os.Getenv("BSIO_API_TOKEN_FILE"), "file containing the operator token (preferred over --api-token)")
 		sessionTTL    = fs.Duration("session-ttl", 12*time.Hour, "how long a UI session stays signed in")
+		tlsCert       = fs.String("tls-cert-file", os.Getenv("BSIO_TLS_CERT_FILE"), "serve HTTPS with this certificate (PEM); needs --tls-key-file. Unset: plain HTTP behind a TLS-terminating edge")
+		tlsKey        = fs.String("tls-key-file", os.Getenv("BSIO_TLS_KEY_FILE"), "private key (PEM) for --tls-cert-file")
 		logFormat     = fs.String("log-format", envOr("BSIO_LOG_FORMAT", "text"), "log format: text|json")
 		showVersion   = fs.Bool("version", false, "print version and exit")
 	)
@@ -77,6 +80,10 @@ func main() {
 
 	if *databaseURL == "" {
 		log.Error("no database configured — pass --database-url or set BSIO_DATABASE_URL")
+		os.Exit(2)
+	}
+	if (*tlsCert == "") != (*tlsKey == "") {
+		log.Error("--tls-cert-file and --tls-key-file go together — set both or neither")
 		os.Exit(2)
 	}
 
@@ -113,6 +120,8 @@ func main() {
 		adminPass:    password,
 		apiToken:     token,
 		sessionTTL:   *sessionTTL,
+		tlsCert:      *tlsCert,
+		tlsKey:       *tlsKey,
 	}); err != nil {
 		log.Error("fatal", "err", err)
 		os.Exit(1)
@@ -131,6 +140,8 @@ type runConfig struct {
 	adminPass    string
 	apiToken     string
 	sessionTTL   time.Duration
+	tlsCert      string
+	tlsKey       string
 }
 
 func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
@@ -250,6 +261,9 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       90 * time.Second,
 		MaxHeaderBytes:    64 << 10,
+		// Only used with --tls-cert-file. TLS 1.2 is the floor; Go's default suites
+		// for 1.2 are already AEAD-only.
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 
 	var wg sync.WaitGroup
@@ -258,9 +272,20 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 	go func() { defer wg.Done(); detector.Run(ctx) }()
 
 	errCh := make(chan error, 1)
+	// Plain HTTP is the default because every deployment so far terminates TLS at the
+	// edge (Envoy / ALB) and reaches the engine over the cluster network. VAPT SAST #50
+	// flagged that as plaintext transport: --tls-cert-file closes the last hop too, for
+	// installs where the network between edge and engine is not trusted.
 	go func() {
-		log.Info("listening", "addr", cfg.listen, "version", version)
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if cfg.tlsCert != "" {
+			log.Info("listening", "addr", cfg.listen, "tls", true, "version", version)
+			err = httpSrv.ListenAndServeTLS(cfg.tlsCert, cfg.tlsKey)
+		} else {
+			log.Info("listening", "addr", cfg.listen, "tls", false, "version", version)
+			err = httpSrv.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
