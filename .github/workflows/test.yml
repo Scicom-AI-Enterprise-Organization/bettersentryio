@@ -6,8 +6,9 @@
 # check that always says ok (CLAUDE.md). -race is the evidence for VAPT SAST #46
 # (race condition, cmd/bettersentryio/main.go + internal/monitor/detector.go).
 #
-# Web: typecheck only. eslint has pre-existing errors on this branch, so it would
-# fail every run for reasons unrelated to the change under review.
+# Web: typecheck and the node:test unit tests (`npm test`, one file per VAPT finding).
+# eslint has pre-existing errors on this branch, so it would fail every run for
+# reasons unrelated to the change under review.
 
 name: test
 
@@ -63,3 +64,4 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci # postinstall runs prisma generate, which tsc needs
       - run: npx tsc --noEmit
+      - run: npm test
