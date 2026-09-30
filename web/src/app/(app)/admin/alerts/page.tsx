@@ -1,4 +1,4 @@
-import { requireUser } from "@/lib/rbac";
+import { requireAdmin } from "@/lib/rbac";
 import { listChannels } from "@/lib/bsio";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ChannelsTable } from "./channels-table";
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function AlertsPage() {
-  await requireUser();
+  await requireAdmin();
   const result = await listChannels();
 
   return (

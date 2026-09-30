@@ -15,10 +15,10 @@ import (
 
 const (
 	sessionCookie = "bsio_session"
-	// DefaultPassword is the development default. It exists so a fresh install is
-	// usable immediately; every code path that can see it also shouts about it.
-	DefaultUser     = "admin"
-	DefaultPassword = "12345"
+	// DefaultUser is only the username. There is deliberately no default password
+	// (VAPT SAST #53): a built-in one is a published credential for every install
+	// that forgot to set its own.
+	DefaultUser = "admin"
 )
 
 type Auth struct {
@@ -27,16 +27,14 @@ type Auth struct {
 	key  []byte
 	ttl  time.Duration
 
-	// UsingDefaults is surfaced in the startup log and as a banner on every page.
-	UsingDefaults bool
+	// Disabled means no password was configured, so every sign-in is refused. It is
+	// surfaced in the startup log and on the login page.
+	Disabled bool
 }
 
 func NewAuth(user, pass string, ttl time.Duration) (*Auth, error) {
 	if user == "" {
 		user = DefaultUser
-	}
-	if pass == "" {
-		pass = DefaultPassword
 	}
 	if ttl <= 0 {
 		ttl = 12 * time.Hour
@@ -49,16 +47,21 @@ func NewAuth(user, pass string, ttl time.Duration) (*Auth, error) {
 		return nil, fmt.Errorf("generate session key: %w", err)
 	}
 	return &Auth{
-		user:          user,
-		pass:          pass,
-		key:           key,
-		ttl:           ttl,
-		UsingDefaults: user == DefaultUser && pass == DefaultPassword,
+		user:     user,
+		pass:     pass,
+		key:      key,
+		ttl:      ttl,
+		Disabled: pass == "",
 	}, nil
 }
 
 // Verify compares in constant time so a wrong password cannot be found by timing.
+// With no password configured it refuses everything — an empty password must not
+// match an empty form field.
 func (a *Auth) Verify(user, pass string) bool {
+	if a.Disabled {
+		return false
+	}
 	u := subtle.ConstantTimeCompare([]byte(user), []byte(a.user))
 	p := subtle.ConstantTimeCompare([]byte(pass), []byte(a.pass))
 	return u == 1 && p == 1
@@ -70,7 +73,11 @@ func (a *Auth) sign(payload string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func (a *Auth) SetCookie(w http.ResponseWriter, secure bool) {
+// SetCookie issues the session. Always Secure: the engine sits behind a TLS edge, so
+// r.TLS is nil on every real request and the old `Secure: r.TLS != nil` never set it
+// (VAPT SAST #44). Browsers treat http://localhost as a secure context, so local
+// development still signs in.
+func (a *Auth) SetCookie(w http.ResponseWriter) {
 	payload := fmt.Sprintf("%s|%d", a.user, time.Now().Add(a.ttl).Unix())
 	http.SetCookie(w, &http.Cookie{
 		Name:  sessionCookie,
@@ -80,15 +87,17 @@ func (a *Auth) SetCookie(w http.ResponseWriter, secure bool) {
 		// that matters for the mute/unmute actions.
 		SameSite: http.SameSiteLaxMode,
 		HttpOnly: true,
-		Secure:   secure,
+		Secure:   true,
 		Expires:  time.Now().Add(a.ttl),
 	})
 }
 
+// Clear expires the session with the same attributes it was set with; a browser
+// matches the deletion to the cookie by them.
 func (a *Auth) Clear(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: "", Path: "/",
-		MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
 	})
 }
 

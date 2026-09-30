@@ -19,6 +19,15 @@ const ROLES: Record<string, string[]> = {
 };
 
 async function main() {
+  // Checked before anything is written, so a refused run leaves the database as it was.
+  const adminEmail = process.env.SEED_ADMIN_EMAIL ?? "admin@example.com";
+  // No fallback password (VAPT SAST #41): a default here is a published credential
+  // for every install that forgot to set one. The seed refuses instead.
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (!adminPassword) {
+    throw new Error("SEED_ADMIN_PASSWORD is not set — choose the first admin's password and export it");
+  }
+
   for (const p of PERMISSIONS) {
     await prisma.permission.upsert({
       where: { key: p.key },
@@ -47,9 +56,6 @@ async function main() {
     }
   }
 
-  const adminEmail = process.env.SEED_ADMIN_EMAIL ?? "admin@example.com";
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "admin1234";
-
   const passwordHash = await bcrypt.hash(adminPassword, 10);
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
@@ -70,7 +76,9 @@ async function main() {
     });
   }
 
-  console.log(`Seeded admin: ${adminEmail} / ${adminPassword}`);
+  // The email only: the password came from the operator, and echoing it would copy it
+  // into every log that captured this run (a CI job, a kubectl exec transcript).
+  console.log(`Seeded admin: ${adminEmail}`);
 }
 
 main()

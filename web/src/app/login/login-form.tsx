@@ -37,6 +37,9 @@ export function LoginForm({ callbackUrl, error, providers }: LoginFormProps) {
         callbackUrl,
       });
       if (res?.error) {
+        // Nothing keeps a rejected password around in page state (VAPT SAST #41);
+        // the user retypes it, as on every sign-in form.
+        setPassword("");
         toast.error("Invalid email or password");
       } else if (res?.url) {
         window.location.href = res.url;

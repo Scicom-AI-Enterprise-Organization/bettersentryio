@@ -1,0 +1,65 @@
+# Tests for the VAPT branches. build.yml publishes images and runs no tests, so before
+# this a vapt-* tag could ship an engine whose suite had never run.
+#
+# The engine suite runs against a real Postgres: the Postgres-backed tests t.Skip
+# without BSIO_TEST_DATABASE_URL, and a suite that skips is the same lie as a health
+# check that always says ok (CLAUDE.md). -race is the evidence for VAPT SAST #46
+# (race condition, cmd/bettersentryio/main.go + internal/monitor/detector.go).
+#
+# Web: typecheck only. eslint has pre-existing errors on this branch, so it would
+# fail every run for reasons unrelated to the change under review.
+
+name: test
+
+on:
+  pull_request:
+    branches: ["vapt-*"]
+  push:
+    branches: ["vapt-*"]
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bettersentryio
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: bettersentryio_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bettersentryio -d bettersentryio_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      BSIO_TEST_DATABASE_URL: postgres://bettersentryio:ci-only@localhost:5432/bettersentryio_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      # -p 1: the Postgres-backed packages truncate the same tables.
+      - run: go test -race -count=1 -p 1 ./...
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci # postinstall runs prisma generate, which tsc needs
+      - run: npx tsc --noEmit

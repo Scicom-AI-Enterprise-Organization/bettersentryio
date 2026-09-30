@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
-import { requireUser } from "@/lib/rbac";
+import { requireAdmin } from "@/lib/rbac";
 import { NewAppForm } from "@/components/bsio/new-app-form";
 
 export const metadata = { title: "Create an app" };
 
 export default async function NewAppPage() {
-  await requireUser();
+  await requireAdmin();
 
   return (
     <div className="max-w-5xl space-y-6">

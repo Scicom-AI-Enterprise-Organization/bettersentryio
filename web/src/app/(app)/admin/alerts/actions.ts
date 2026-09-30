@@ -1,13 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/rbac";
+import { requireAdmin } from "@/lib/rbac";
 import { createChannel, deleteChannel, testChannel, updateChannel } from "@/lib/bsio";
 
 export type ActionState = { ok: boolean; message: string } | null;
 
 export async function addChannel(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  await requireUser();
+  await requireAdmin();
   const name = String(formData.get("name") ?? "").trim();
   const type = String(formData.get("type") ?? "teams");
   const url = String(formData.get("url") ?? "").trim();
@@ -18,7 +18,7 @@ export async function addChannel(_prev: ActionState, formData: FormData): Promis
 }
 
 export async function editChannel(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  await requireUser();
+  await requireAdmin();
   const id = Number(formData.get("id"));
   const name = String(formData.get("name") ?? "").trim();
   const url = String(formData.get("url") ?? "").trim();
@@ -32,7 +32,7 @@ export async function editChannel(_prev: ActionState, formData: FormData): Promi
 }
 
 export async function toggleChannel(id: number, enabled: boolean): Promise<ActionState> {
-  await requireUser();
+  await requireAdmin();
   const result = await updateChannel(id, { enabled });
   if (!result.ok) return { ok: false, message: result.error };
   revalidatePath("/admin/alerts");
@@ -40,7 +40,7 @@ export async function toggleChannel(id: number, enabled: boolean): Promise<Actio
 }
 
 export async function removeChannel(id: number): Promise<ActionState> {
-  await requireUser();
+  await requireAdmin();
   const result = await deleteChannel(id);
   if (!result.ok) return { ok: false, message: result.error };
   revalidatePath("/admin/alerts");
@@ -53,7 +53,7 @@ export async function removeChannel(id: number): Promise<ActionState> {
  * button needs before it opens.
  */
 export async function testWebhook(type: string, url: string): Promise<ActionState> {
-  await requireUser();
+  await requireAdmin();
   const result = await testChannel(type, url);
   if (!result.ok) return { ok: false, message: result.error };
   return { ok: true, message: "Test card delivered — check the channel, then add it." };

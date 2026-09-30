@@ -84,6 +84,7 @@ func newEnv(t *testing.T) *env {
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	alerter := alert.New(db, log, 64)
+	alerter.AllowPrivateDestinations() // webhooks here are httptest servers on 127.0.0.1
 	clk := &clock{t: time.Now().UTC().Truncate(time.Second)}
 	engine := NewEngine(db, alerter, log, "http://test")
 	engine.SetClock(clk.now)

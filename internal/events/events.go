@@ -8,7 +8,7 @@ package events
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -234,7 +234,7 @@ func Fingerprint(e *Event) (fingerprint, kind, culprit, title string) {
 	// hash we computed, per Sentry's contract; ["{{ default }}"] alone is a no-op.
 	if len(e.Fingerprint) > 0 {
 		custom := false
-		h := md5.New()
+		h := sha256.New()
 		for _, part := range e.Fingerprint {
 			if strings.TrimSpace(part) == "{{ default }}" {
 				fmt.Fprintf(h, "\x00%s", fingerprint)
@@ -250,8 +250,12 @@ func Fingerprint(e *Event) (fingerprint, kind, culprit, title string) {
 	return fingerprint, kind, culprit, title
 }
 
+// fingerprintDefault hashes with SHA-256 (VAPT SAST #47 flagged MD5). The hash is a
+// grouping key, not a secret, but a weak one would let a crafted event collide into
+// somebody else's issue. Switching regrouped every issue once: events after the change
+// open new issues rather than joining ones fingerprinted under MD5.
 func fingerprintDefault(e *Event) (fingerprint, kind, culprit, title string) {
-	h := md5.New()
+	h := sha256.New()
 
 	var exc *Exception
 	if e.Exception != nil && len(e.Exception.Values) > 0 {

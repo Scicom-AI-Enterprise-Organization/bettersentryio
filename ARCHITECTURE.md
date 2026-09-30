@@ -63,7 +63,7 @@ flowchart LR
     subgraph pipeline [Event pipeline]
         PARSE["envelope parser<br/>(length-exact, tolerant)"]
         NORM["normalize<br/>(schema-permissive, clamps)"]
-        GROUP["grouping<br/>(fingerprint → md5)"]
+        GROUP["grouping<br/>(fingerprint → sha256)"]
     end
 
     subgraph monitors [Monitor engine]
@@ -250,7 +250,7 @@ else:      parts = [parameterize(first_2_lines(message))]
 values = parts                    if fp == ["{{ default }}"]
        = fp                       if "{{ default }}" not in fp
        = splice(fp, default→parts) otherwise
-hash = md5(concat(values))
+hash = sha256(concat(values))
 ```
 
 3. **Issue lifecycle** — `group_hashes` lookup: hit → bump `last_seen`/`event_count`; if the
@@ -361,7 +361,7 @@ sequenceDiagram
     participant S as bettersentryio
     participant T as MS Teams
     P->>S: POST /api/1/envelope/ (gzip, X-Sentry-Auth)
-    S->>S: parse → normalize → fingerprint md5
+    S->>S: parse → normalize → fingerprint sha256
     S->>S: group_hashes miss → create issue #42
     S-->>P: 200 {"id":"…"}  (SDK never parses body)
     S->>T: 🆕 [tts-api] RuntimeError: CUDA error… (issue #42)

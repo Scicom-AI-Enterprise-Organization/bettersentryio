@@ -18,7 +18,11 @@ func quiet() *slog.Logger {
 }
 
 // TestChannel touches no tables, so a nil DB is enough to exercise delivery.
-func testAlerter() *Alerter { return New(nil, quiet(), 1) }
+func testAlerter() *Alerter {
+	a := New(nil, quiet(), 1)
+	a.AllowPrivateDestinations() // upstreams are httptest servers on 127.0.0.1
+	return a
+}
 
 func TestTestChannelDeliversAProbe(t *testing.T) {
 	var (

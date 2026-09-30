@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -55,12 +56,15 @@ func main() {
 		maxConns      = fs.Int("db-max-conns", 10, "Postgres connection pool size")
 		alertWebhook  = fs.String("alert-webhook", os.Getenv("BSIO_ALERT_WEBHOOK"), "webhook URL to register as the 'default' alert channel")
 		alertType     = fs.String("alert-type", envOr("BSIO_ALERT_TYPE", "webhook"), "type of --alert-webhook: webhook|slack|teams")
+		alertPrivate  = fs.Bool("alert-allow-private", os.Getenv("BSIO_ALERT_ALLOW_PRIVATE") == "1", "let alert webhooks reach private/loopback addresses, for an internal relay (env BSIO_ALERT_ALLOW_PRIVATE=1)")
 		adminUser     = fs.String("admin-user", envOr("BSIO_ADMIN_USER", web.DefaultUser), "username for the web UI")
-		adminPass     = fs.String("admin-password", os.Getenv("BSIO_ADMIN_PASSWORD"), "password for the web UI (development default: "+web.DefaultPassword+")")
+		adminPass     = fs.String("admin-password", os.Getenv("BSIO_ADMIN_PASSWORD"), "password for the web UI (unset: UI sign-in is disabled)")
 		adminPassFile = fs.String("admin-password-file", os.Getenv("BSIO_ADMIN_PASSWORD_FILE"), "file containing the web UI password (preferred over --admin-password)")
 		apiToken      = fs.String("api-token", os.Getenv("BSIO_API_TOKEN"), "operator token for the admin API (create/delete apps, mute). Unset: any ingest key is accepted, which is development-only")
 		apiTokenFile  = fs.String("api-token-file", os.Getenv("BSIO_API_TOKEN_FILE"), "file containing the operator token (preferred over --api-token)")
 		sessionTTL    = fs.Duration("session-ttl", 12*time.Hour, "how long a UI session stays signed in")
+		tlsCert       = fs.String("tls-cert-file", os.Getenv("BSIO_TLS_CERT_FILE"), "serve HTTPS with this certificate (PEM); needs --tls-key-file. Unset: plain HTTP behind a TLS-terminating edge")
+		tlsKey        = fs.String("tls-key-file", os.Getenv("BSIO_TLS_KEY_FILE"), "private key (PEM) for --tls-cert-file")
 		logFormat     = fs.String("log-format", envOr("BSIO_LOG_FORMAT", "text"), "log format: text|json")
 		showVersion   = fs.Bool("version", false, "print version and exit")
 	)
@@ -77,6 +81,10 @@ func main() {
 
 	if *databaseURL == "" {
 		log.Error("no database configured — pass --database-url or set BSIO_DATABASE_URL")
+		os.Exit(2)
+	}
+	if (*tlsCert == "") != (*tlsKey == "") {
+		log.Error("--tls-cert-file and --tls-key-file go together — set both or neither")
 		os.Exit(2)
 	}
 
@@ -109,10 +117,13 @@ func main() {
 		maxConns:     int32(*maxConns),
 		alertWebhook: *alertWebhook,
 		alertType:    *alertType,
+		alertPrivate: *alertPrivate,
 		adminUser:    *adminUser,
 		adminPass:    password,
 		apiToken:     token,
 		sessionTTL:   *sessionTTL,
+		tlsCert:      *tlsCert,
+		tlsKey:       *tlsKey,
 	}); err != nil {
 		log.Error("fatal", "err", err)
 		os.Exit(1)
@@ -127,10 +138,13 @@ type runConfig struct {
 	maxConns     int32
 	alertWebhook string
 	alertType    string
+	alertPrivate bool
 	adminUser    string
 	adminPass    string
 	apiToken     string
 	sessionTTL   time.Duration
+	tlsCert      string
+	tlsKey       string
 }
 
 func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
@@ -163,7 +177,10 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 	}
 
 	if cfg.alertWebhook != "" {
-		blob, _ := json.Marshal(map[string]string{"url": cfg.alertWebhook})
+		blob, err := json.Marshal(map[string]string{"url": cfg.alertWebhook})
+		if err != nil {
+			return fmt.Errorf("encode alert channel: %w", err)
+		}
 		if err := db.EnsureChannel(ctx, "default", cfg.alertType, string(blob)); err != nil {
 			return fmt.Errorf("register alert channel: %w", err)
 		}
@@ -172,6 +189,10 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 
 	alerter := alert.New(db, log.With("component", "alerter"), 256)
 	alerter.SetBaseURL(cfg.baseURL)
+	if cfg.alertPrivate {
+		alerter.AllowPrivateDestinations()
+		log.Warn("alert webhooks may reach private and loopback addresses (--alert-allow-private)")
+	}
 	engine := monitor.NewEngine(db, alerter, log.With("component", "engine"), cfg.baseURL)
 	detector := monitor.NewDetector(db, alerter, log.With("component", "detector"), cfg.tickInterval, cfg.baseURL)
 
@@ -179,10 +200,9 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 	if err != nil {
 		return err
 	}
-	if auth.UsingDefaults {
-		log.Warn("USING DEFAULT CREDENTIALS — the web UI accepts admin/12345. "+
-			"Set --admin-password-file or BSIO_ADMIN_PASSWORD before exposing this instance.",
-			"user", web.DefaultUser)
+	if auth.Disabled {
+		log.Warn("NO UI PASSWORD SET — web UI sign-in is disabled. " +
+			"Set --admin-password-file or BSIO_ADMIN_PASSWORD to enable it.")
 	}
 	if cfg.apiToken == "" {
 		log.Warn("NO API TOKEN SET — any valid ingest key may create and delete apps. " +
@@ -236,11 +256,21 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 		}
 	}()
 
+	// Every phase of a connection is bounded (VAPT SAST #40): without ReadTimeout a
+	// client could trickle a 20 MB envelope body forever, and without IdleTimeout a
+	// kept-alive connection never closed. 64 KiB of request line + headers also bounds
+	// how many ?tag= / field= / search terms one query can pile into its SQL.
 	httpSrv := &http.Server{
 		Addr:              cfg.listen,
 		Handler:           server.Handler(ui),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       90 * time.Second,
+		MaxHeaderBytes:    64 << 10,
+		// Only used with --tls-cert-file. TLS 1.2 is the floor; Go's default suites
+		// for 1.2 are already AEAD-only.
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 
 	var wg sync.WaitGroup
@@ -249,9 +279,20 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 	go func() { defer wg.Done(); detector.Run(ctx) }()
 
 	errCh := make(chan error, 1)
+	// Plain HTTP is the default because every deployment so far terminates TLS at the
+	// edge (Envoy / ALB) and reaches the engine over the cluster network. VAPT SAST #50
+	// flagged that as plaintext transport: --tls-cert-file closes the last hop too, for
+	// installs where the network between edge and engine is not trusted.
 	go func() {
-		log.Info("listening", "addr", cfg.listen, "version", version)
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if cfg.tlsCert != "" {
+			log.Info("listening", "addr", cfg.listen, "tls", true, "version", version)
+			err = httpSrv.ListenAndServeTLS(cfg.tlsCert, cfg.tlsKey)
+		} else {
+			log.Info("listening", "addr", cfg.listen, "tls", false, "version", version)
+			err = httpSrv.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()

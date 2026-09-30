@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/rbac";
+import { requireAdmin, requireUser } from "@/lib/rbac";
 import { archiveIssue, deleteIssue, resolveIssue, setIssuePriority } from "@/lib/bsio";
 
 export type ActResult = { ok: boolean; message: string };
@@ -37,7 +37,7 @@ export async function actPriority(id: number, priority: string): Promise<ActResu
 }
 
 export async function actDelete(id: number, slug: string): Promise<ActResult> {
-  await requireUser();
+  await requireAdmin();
   const r = await deleteIssue(id);
   if (!r.ok) return { ok: false, message: r.error };
   redirect(`/apps/${slug}/issues/outages`);

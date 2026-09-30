@@ -6,8 +6,9 @@
  * would paint the expanded sidebar first and snap it shut on hydration — the flash is
  * exactly what a persisted preference is supposed to prevent.
  *
- * Not httpOnly: the panels toggle it in the browser. It holds a layout preference, so
- * there is nothing to protect.
+ * Not httpOnly: the panels toggle it in the browser, and it holds a layout preference.
+ * Still Secure (VAPT SAST #48): no cookie of ours travels over plain http. Browsers
+ * treat http://localhost as a secure context, so `next dev` keeps it too.
  */
 
 export const NAV_PANEL_COOKIE = "bsio.nav-collapsed";
@@ -23,5 +24,5 @@ export function panelCollapsed(value: string | undefined): boolean {
 
 /** Browser-side write. Called from the panels' toggles, never on the server. */
 export function rememberPanel(name: string, collapsed: boolean): void {
-  document.cookie = `${name}=${collapsed ? "1" : "0"}; path=/; max-age=${MAX_AGE}; samesite=lax`;
+  document.cookie = `${name}=${collapsed ? "1" : "0"}; path=/; max-age=${MAX_AGE}; samesite=lax; secure`;
 }

@@ -1,4 +1,4 @@
-import { requireUser } from "@/lib/rbac";
+import { requireAdmin } from "@/lib/rbac";
 import { getApiTokens } from "@/lib/bsio";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { TokensTable } from "./tokens-table";
@@ -18,7 +18,7 @@ export const metadata = { title: "API tokens" };
  * revocable, and reports when it was last used.
  */
 export default async function TokensPage() {
-  await requireUser();
+  await requireAdmin();
   const result = await getApiTokens();
 
   return (

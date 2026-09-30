@@ -2,13 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requireUser } from "@/lib/rbac";
+import { requireAdmin } from "@/lib/rbac";
 import { setAppRetention } from "@/lib/bsio";
 
 export type RetentionState = { ok: boolean; message: string } | null;
 
 export async function changeRetention(slug: string, days: number): Promise<RetentionState> {
-  await requireUser();
+  await requireAdmin();
   if (!Number.isInteger(days) || days < 0 || days > 3650) {
     return { ok: false, message: "Retention must be between 0 (keep forever) and 3650 days." };
   }
