@@ -70,7 +70,11 @@ func (a *Auth) sign(payload string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func (a *Auth) SetCookie(w http.ResponseWriter, secure bool) {
+// SetCookie issues the session. Always Secure: the engine sits behind a TLS edge, so
+// r.TLS is nil on every real request and the old `Secure: r.TLS != nil` never set it
+// (VAPT SAST #44). Browsers treat http://localhost as a secure context, so local
+// development still signs in.
+func (a *Auth) SetCookie(w http.ResponseWriter) {
 	payload := fmt.Sprintf("%s|%d", a.user, time.Now().Add(a.ttl).Unix())
 	http.SetCookie(w, &http.Cookie{
 		Name:  sessionCookie,
@@ -80,15 +84,17 @@ func (a *Auth) SetCookie(w http.ResponseWriter, secure bool) {
 		// that matters for the mute/unmute actions.
 		SameSite: http.SameSiteLaxMode,
 		HttpOnly: true,
-		Secure:   secure,
+		Secure:   true,
 		Expires:  time.Now().Add(a.ttl),
 	})
 }
 
+// Clear expires the session with the same attributes it was set with; a browser
+// matches the deletion to the cookie by them.
 func (a *Auth) Clear(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: "", Path: "/",
-		MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
 	})
 }
 

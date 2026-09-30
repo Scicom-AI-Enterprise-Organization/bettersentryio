@@ -137,12 +137,17 @@ func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	s.auth.SetCookie(w, r.TLS != nil)
-	next := r.PostFormValue("next")
-	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
-		next = "/"
+	s.auth.SetCookie(w)
+	http.Redirect(w, r, localPath(r.PostFormValue("next")), http.StatusSeeOther)
+}
+
+// localPath keeps the post-login redirect on this host. Browsers read a backslash as a
+// slash, so `/\evil.example` is the same off-site URL as `//evil.example`.
+func localPath(next string) string {
+	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.ContainsRune(next, '\\') {
+		return "/"
 	}
-	http.Redirect(w, r, next, http.StatusSeeOther)
+	return next
 }
 
 func (s *Server) postLogout(w http.ResponseWriter, r *http.Request) {
