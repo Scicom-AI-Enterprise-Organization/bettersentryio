@@ -1,4 +1,4 @@
-import { requireUser } from "@/lib/rbac";
+import { requireAdmin } from "@/lib/rbac";
 import { getAuditLog } from "@/lib/bsio";
 import { DEFAULT_RANGE, RANGES, customReady, resolveWindow } from "@/lib/ranges";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -51,7 +51,7 @@ export default async function AuditPage({
     after?: string;
   }>;
 }) {
-  await requireUser();
+  await requireAdmin();
   const sp = await searchParams;
   const limit = Math.min(Math.max(Number(sp.limit) || 100, 1), 1000);
   const window = resolveWindow(sp);

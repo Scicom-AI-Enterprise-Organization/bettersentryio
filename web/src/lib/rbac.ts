@@ -50,3 +50,15 @@ export async function requirePermission(permission: string): Promise<SessionUser
   if (!hasPermission(user, permission)) redirect("/forbidden");
   return user;
 }
+
+/**
+ * For anything that changes the engine's state or reads its operator surface. The web
+ * reaches the engine with the operator token, which can do everything — create and
+ * delete apps, mint read-all API tokens, point alerts at any URL — so the engine
+ * cannot tell a member from an admin, and this check is the only one there is.
+ * VAPT: every such action and page used to call requireUser(), so a member with no
+ * permissions at all could do all of it.
+ */
+export async function requireAdmin(): Promise<SessionUser> {
+  return requireRole("admin");
+}

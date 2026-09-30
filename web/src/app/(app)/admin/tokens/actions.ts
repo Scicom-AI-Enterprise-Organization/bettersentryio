@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requireUser } from "@/lib/rbac";
+import { requireAdmin } from "@/lib/rbac";
 import { createApiToken, revokeApiToken } from "@/lib/bsio";
 
 /**
@@ -19,7 +19,7 @@ export async function mintToken(
   _prev: TokenActionState,
   formData: FormData,
 ): Promise<TokenActionState> {
-  await requireUser();
+  await requireAdmin();
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { ok: false, message: "Give the token a name — you will be revoking it by that name later." };
 
@@ -34,7 +34,7 @@ export async function mintToken(
 }
 
 export async function revokeToken(id: number): Promise<TokenActionState> {
-  await requireUser();
+  await requireAdmin();
   const result = await revokeApiToken(id);
   if (!result.ok) return { ok: false, message: result.error };
   revalidatePath("/admin/tokens");

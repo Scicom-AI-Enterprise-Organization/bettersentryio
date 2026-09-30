@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/rbac";
+import { requireAdmin } from "@/lib/rbac";
 import { createApp, deleteApp } from "@/lib/bsio";
 
 export type AddAppState = {
@@ -15,7 +15,7 @@ export type AddAppState = {
  * dialog can hand the user straight to that app's setup instructions.
  */
 export async function addApp(_prev: AddAppState, formData: FormData): Promise<AddAppState> {
-  await requireUser();
+  await requireAdmin();
 
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { error: "Give the app a name." };
@@ -42,7 +42,7 @@ export type DeleteAppState = { error?: string };
  * with the app. The dialog states what will be lost before this runs.
  */
 export async function removeApp(_prev: DeleteAppState, formData: FormData): Promise<DeleteAppState> {
-  await requireUser();
+  await requireAdmin();
 
   const slug = String(formData.get("slug") ?? "").trim();
   if (!slug) return { error: "Missing app." };

@@ -52,6 +52,9 @@ export default async function MonitorDetailPage({
 
   async function toggleMute() {
     "use server";
+    // A server action is its own endpoint: the page's check above does not run when
+    // the action is invoked, so it checks for itself.
+    await requireUser();
     await setMuted(slug, !m.muted);
     revalidatePath(`/monitors/${slug}`);
   }

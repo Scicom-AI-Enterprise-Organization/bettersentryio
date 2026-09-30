@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requireUser } from "@/lib/rbac";
+import { requireAdmin } from "@/lib/rbac";
 import {
   createProjectChannel,
   deleteProjectChannel,
@@ -25,7 +25,7 @@ export async function addProjectChannel(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  await requireUser();
+  await requireAdmin();
   const slug = String(formData.get("slug") ?? "");
   const name = String(formData.get("name") ?? "").trim();
   const type = String(formData.get("type") ?? "teams");
@@ -40,7 +40,7 @@ export async function editProjectChannel(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  await requireUser();
+  await requireAdmin();
   const slug = String(formData.get("slug") ?? "");
   const id = Number(formData.get("id"));
   const name = String(formData.get("name") ?? "").trim();
@@ -59,7 +59,7 @@ export async function toggleProjectChannel(
   id: number,
   enabled: boolean,
 ): Promise<ActionState> {
-  await requireUser();
+  await requireAdmin();
   const result = await updateProjectChannel(slug, id, { enabled });
   if (!result.ok) return { ok: false, message: result.error };
   done(slug);
@@ -67,7 +67,7 @@ export async function toggleProjectChannel(
 }
 
 export async function removeProjectChannel(slug: string, id: number): Promise<ActionState> {
-  await requireUser();
+  await requireAdmin();
   const result = await deleteProjectChannel(slug, id);
   if (!result.ok) return { ok: false, message: result.error };
   done(slug);
@@ -81,7 +81,7 @@ export async function setImported(
   id: number,
   imported: boolean,
 ): Promise<ActionState> {
-  await requireUser();
+  await requireAdmin();
   const result = imported
     ? await importChannels(slug, [id])
     : await unimportChannel(slug, id);
@@ -94,7 +94,7 @@ export async function setImported(
 }
 
 export async function importAll(slug: string, ids: number[]): Promise<ActionState> {
-  await requireUser();
+  await requireAdmin();
   if (ids.length === 0) return { ok: false, message: "Nothing left to import." };
   const result = await importChannels(slug, ids);
   if (!result.ok) return { ok: false, message: result.error };
@@ -103,7 +103,7 @@ export async function importAll(slug: string, ids: number[]): Promise<ActionStat
 }
 
 export async function changePatience(slug: string, seconds: number): Promise<ActionState> {
-  await requireUser();
+  await requireAdmin();
   const result = await setAlertPatience(slug, seconds);
   if (!result.ok) return { ok: false, message: result.error };
   done(slug);
@@ -112,7 +112,7 @@ export async function changePatience(slug: string, seconds: number): Promise<Act
 
 /** Same probe as the global form: a card has to arrive before a channel can be saved. */
 export async function testWebhook(type: string, url: string): Promise<ActionState> {
-  await requireUser();
+  await requireAdmin();
   const result = await testChannel(type, url);
   if (!result.ok) return { ok: false, message: result.error };
   return { ok: true, message: "Test card delivered — check the channel, then add it." };

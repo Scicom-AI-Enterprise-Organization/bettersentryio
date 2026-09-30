@@ -1,17 +1,19 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/rbac";
+import { requireAdmin, requireUser } from "@/lib/rbac";
 import { archiveIssue, deleteIssue, resolveIssue, setIssuePriority } from "@/lib/bsio";
 
 export type BulkResult = { ok: boolean; message: string };
 
+// Triage (resolve, archive, priority) is any member's job; deleting is not.
 async function forEachIssue(
   ids: number[],
   fn: (id: number) => Promise<{ ok: boolean; error?: string }>,
   did: string,
+  guard: () => Promise<unknown> = requireUser,
 ): Promise<BulkResult> {
-  await requireUser();
+  await guard();
   let failed = 0;
   for (const id of ids) {
     const r = await fn(id);
@@ -39,5 +41,5 @@ export async function bulkPriority(ids: number[], priority: string): Promise<Bul
 }
 
 export async function bulkDelete(ids: number[]): Promise<BulkResult> {
-  return forEachIssue(ids, (id) => deleteIssue(id), "Deleted");
+  return forEachIssue(ids, (id) => deleteIssue(id), "Deleted", requireAdmin);
 }
