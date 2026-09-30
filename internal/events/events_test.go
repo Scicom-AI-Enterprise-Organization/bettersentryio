@@ -1,6 +1,9 @@
 package events
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func frame(mod, file, fn string, line int, inApp bool) Frame {
 	return Frame{Module: mod, Filename: file, Function: fn, Lineno: line, InApp: inApp}
@@ -125,6 +128,26 @@ func TestParameterize(t *testing.T) {
 	for in, want := range cases {
 		if got := parameterize(in); got != want {
 			t.Errorf("parameterize(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Fingerprints are SHA-256 hex, for the default path, a message, and an SDK-supplied
+// fingerprint alike. MD5's 32 hex digits here would mean a path still uses it.
+func TestFingerprintIsSHA256(t *testing.T) {
+	custom := exc("KeyError", "x", frame("app", "app.py", "handler", 1, true))
+	custom.Fingerprint = []string{"{{ default }}", "tenant-a"}
+	for name, e := range map[string]*Event{
+		"exception": exc("KeyError", "x", frame("app", "app.py", "handler", 1, true)),
+		"message":   {Message: "user 91 not found"},
+		"custom":    custom,
+	} {
+		fp, _, _, _ := Fingerprint(e)
+		if len(fp) != 64 || strings.Trim(fp, "0123456789abcdef") != "" {
+			t.Errorf("%s: fingerprint %q is not SHA-256 hex", name, fp)
+		}
+		if again, _, _, _ := Fingerprint(e); again != fp {
+			t.Errorf("%s: fingerprint not deterministic: %q then %q", name, fp, again)
 		}
 	}
 }
