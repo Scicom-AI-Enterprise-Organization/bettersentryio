@@ -266,7 +266,11 @@ func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request) {
 	var envHeader struct {
 		EventID string `json:"event_id"`
 	}
-	_ = json.Unmarshal(header, &envHeader)
+	if err := json.Unmarshal(header, &envHeader); err != nil {
+		// parseEnvelope accepted the framing; an unreadable header only costs us the
+		// SDK's event id, and the response falls back to a fresh one below.
+		s.log.Debug("envelope header unreadable", "project", projectID, "err", err)
+	}
 
 	dropped := map[string]int{}
 	responseID := envHeader.EventID
@@ -390,7 +394,9 @@ func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request) {
 	}
 	if responseID == "" {
 		var b [16]byte
-		_, _ = rand.Read(b[:])
+		if _, err := rand.Read(b[:]); err != nil {
+			s.log.Error("event id generation failed", "err", err)
+		}
 		responseID = hex.EncodeToString(b[:])
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": responseID})

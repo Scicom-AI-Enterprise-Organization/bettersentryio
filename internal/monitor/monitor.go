@@ -310,7 +310,9 @@ func ensureMonitor(ctx context.Context, tx pgx.Tx, req BeatRequest) (int64, Conf
 			).Scan(&id, &raw); err != nil {
 				return 0, cfg, false, err
 			}
-			_ = json.Unmarshal(raw, &cfg)
+			if err := json.Unmarshal(raw, &cfg); err != nil {
+				return 0, cfg, false, fmt.Errorf("monitor %s config: %w", req.Slug, err)
+			}
 			return id, cfg, false, nil
 		}
 		if err != nil {

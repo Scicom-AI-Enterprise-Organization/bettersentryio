@@ -251,7 +251,7 @@ func (s *Server) handleSentryIssues(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		s.log.Error("sentry issues failed", "err", err)
-		sentryErr(w, http.StatusServiceUnavailable, "could not read issues: "+err.Error())
+		sentryErr(w, http.StatusServiceUnavailable, "could not read issues")
 		return
 	}
 

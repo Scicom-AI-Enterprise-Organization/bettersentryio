@@ -428,7 +428,12 @@ func (e *Engine) Channels(ctx context.Context) ([]Channel, error) {
 			return nil, err
 		}
 		cfg := map[string]string{}
-		_ = json.Unmarshal(raw, &cfg)
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			// One bad row must not blank the whole channel list; say which one it is.
+			c.Target = "(unreadable config)"
+			out = append(out, c)
+			continue
+		}
 		// Never render a secret. A webhook URL is itself a credential, and a bot
 		// token certainly is, so both are reduced to something recognisable.
 		switch {

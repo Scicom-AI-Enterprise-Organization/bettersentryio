@@ -336,11 +336,23 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	var problems []string
+	// The probe itself is unauthenticated, so raw error text — a pgx dial error names
+	// the database host and user, a failed sweep quotes SQL — goes only to a caller
+	// holding the operator token or a session. Everyone gets the same status code and
+	// the same problem list minus those details; the full text is always in the log.
+	detail := s.hasAPIToken(r) || (s.session != nil && s.session.Authenticated(r))
+	withDetail := func(msg, extra string) string {
+		if detail && extra != "" {
+			return msg + ": " + extra
+		}
+		return msg
+	}
 
 	dbState := "ok"
 	if err := s.db.Ping(ctx); err != nil {
 		dbState = "unreachable"
-		problems = append(problems, "database unreachable: "+err.Error())
+		s.log.Warn("health: database ping failed", "err", err)
+		problems = append(problems, withDetail("database unreachable", err.Error()))
 	}
 
 	tickAge := s.detector.LastTickAge()
@@ -363,14 +375,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	// Lock-acquisition failures land here too, so a standby that *cannot even try*
 	// is still visible.
 	if f := s.detector.Failures(); f > 0 {
-		problems = append(problems,
-			"detector sweep failing ("+strconv.FormatInt(f, 10)+" consecutive): "+s.detector.LastError())
+		problems = append(problems, withDetail(
+			"detector sweep failing ("+strconv.FormatInt(f, 10)+" consecutive)", s.detector.LastError()))
 	}
 
 	if dropped := s.alerter.Dropped(); dropped > 0 {
 		problems = append(problems, "alert queue has dropped "+strconv.FormatInt(dropped, 10)+" events")
 	}
 
+	lastErr := ""
+	if detail {
+		lastErr = s.detector.LastError()
+	}
 	h := health{
 		Status:  "ok",
 		Version: s.version,
@@ -380,7 +396,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"ticks":                s.detector.Ticks(),
 			"last_tick_age_s":      int64(tickAge.Seconds()),
 			"consecutive_failures": s.detector.Failures(),
-			"last_error":           s.detector.LastError(),
+			"last_error":           lastErr,
 			// false = standing by; another replica holds the detector lock.
 			"leader": s.detector.Leading(),
 		},

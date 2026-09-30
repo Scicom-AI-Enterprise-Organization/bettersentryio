@@ -163,7 +163,10 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 	}
 
 	if cfg.alertWebhook != "" {
-		blob, _ := json.Marshal(map[string]string{"url": cfg.alertWebhook})
+		blob, err := json.Marshal(map[string]string{"url": cfg.alertWebhook})
+		if err != nil {
+			return fmt.Errorf("encode alert channel: %w", err)
+		}
 		if err := db.EnsureChannel(ctx, "default", cfg.alertType, string(blob)); err != nil {
 			return fmt.Errorf("register alert channel: %w", err)
 		}

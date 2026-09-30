@@ -22,10 +22,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/events"
 	"github.com/Scicom-AI-Enterprise-Organization/bettersentryio/internal/monitor"
@@ -127,11 +130,15 @@ func (s *Server) checkInSchedule(ctx context.Context, projectID int64, c checkIn
 
 	// No config: the gap between successive ok check-ins IS the schedule.
 	var last *time.Time
-	_ = s.db.QueryRow(ctx, `
+	if err := s.db.QueryRow(ctx, `
 		select ms.last_beat_at from monitor_state ms
 		join monitors m on m.id = ms.monitor_id
 		where m.project_id = $1 and m.slug = $2 and ms.environment = $3`,
-		projectID, c.MonitorSlug, env).Scan(&last)
+		projectID, c.MonitorSlug, env).Scan(&last); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		// No row is the first check-in and expected; anything else is worth a line,
+		// and the check-in still records with the default schedule.
+		s.log.Warn("check-in schedule lookup failed", "monitor", c.MonitorSlug, "err", err)
+	}
 	if last != nil {
 		gap := time.Since(*last)
 		if gap < time.Minute {

@@ -411,7 +411,10 @@ func (a *Alerter) sendWithin(ctx context.Context, ch channel, ev Event, attempts
 			lastErr = err
 			continue
 		}
-		drained, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		drained, readErr := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		if readErr != nil {
+			drained = []byte("(unreadable body: " + readErr.Error() + ")")
+		}
 		resp.Body.Close()
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return nil

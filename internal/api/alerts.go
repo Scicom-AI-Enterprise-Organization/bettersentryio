@@ -149,7 +149,12 @@ func (s *Server) handleSetTeamsAlert(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "a Teams incoming-webhook URL starts with https://")
 		return
 	}
-	cfg, _ := json.Marshal(map[string]string{"url": body.URL})
+	cfg, err := json.Marshal(map[string]string{"url": body.URL})
+	if err != nil {
+		s.log.Error("encode teams channel failed", "err", err)
+		writeErr(w, http.StatusInternalServerError, "could not save the channel")
+		return
+	}
 	if err := s.db.EnsureChannel(r.Context(), teamsChannelName, "teams", string(cfg)); err != nil {
 		s.log.Error("save teams channel failed", "err", err)
 		writeErr(w, http.StatusServiceUnavailable, "could not save the channel")
