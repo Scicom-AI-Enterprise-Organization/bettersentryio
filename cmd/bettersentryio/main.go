@@ -235,11 +235,18 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 		}
 	}()
 
+	// Every phase of a connection is bounded (VAPT SAST #40): without ReadTimeout a
+	// client could trickle a 20 MB envelope body forever, and without IdleTimeout a
+	// kept-alive connection never closed. 64 KiB of request line + headers also bounds
+	// how many ?tag= / field= / search terms one query can pile into its SQL.
 	httpSrv := &http.Server{
 		Addr:              cfg.listen,
 		Handler:           server.Handler(ui),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       90 * time.Second,
+		MaxHeaderBytes:    64 << 10,
 	}
 
 	var wg sync.WaitGroup

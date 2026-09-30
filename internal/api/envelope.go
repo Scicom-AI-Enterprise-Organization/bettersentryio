@@ -203,6 +203,21 @@ func (l *envelopeLimiter) allow(projectID int64) bool {
 	return true
 }
 
+// throttleIngest spends one token from the project's ingest bucket, and answers 429 +
+// Retry-After when it is empty. Envelopes and POST /api/0/errors share the bucket: both
+// write an error event, and an ingest key is public by design (it ships inside every
+// client), so either door left open would let anyone holding one flood Postgres.
+func (s *Server) throttleIngest(w http.ResponseWriter, projectID int64) bool {
+	if s.envLimit.allow(projectID) {
+		return false
+	}
+	ingestRejected.With("rate_limited").Inc()
+	w.Header().Set("Retry-After", "5")
+	w.Header().Set("X-Sentry-Rate-Limits", "5:error:project")
+	writeErr(w, http.StatusTooManyRequests, "rate limited")
+	return true
+}
+
 // handleEnvelope is the Sentry envelope endpoint.
 func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request) {
 	projectID, err := strconv.ParseInt(r.PathValue("projectID"), 10, 64)
@@ -227,11 +242,7 @@ func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.envLimit.allow(projectID) {
-		ingestRejected.With("rate_limited").Inc()
-		w.Header().Set("Retry-After", "5")
-		w.Header().Set("X-Sentry-Rate-Limits", "5:error:project")
-		writeErr(w, http.StatusTooManyRequests, "rate limited")
+	if s.throttleIngest(w, projectID) {
 		return
 	}
 

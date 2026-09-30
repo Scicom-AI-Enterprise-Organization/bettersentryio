@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -158,5 +159,27 @@ func TestReadEnvelopeBodyRejectsUnknownEncoding(t *testing.T) {
 	r.Header.Set("Content-Encoding", "br")
 	if _, err := readEnvelopeBody(httptest.NewRecorder(), r); err == nil {
 		t.Fatal("brotli must be refused, not silently misparsed")
+	}
+}
+
+// A project that has spent its burst is told to back off with 429 + Retry-After, on the
+// shared path both ingest doors (envelope and POST /api/0/errors) go through.
+func TestThrottleIngestAnswers429WhenTheBucketIsEmpty(t *testing.T) {
+	s := &Server{}
+	for i := 0; i < envelopeBurst; i++ {
+		if s.throttleIngest(httptest.NewRecorder(), 7) {
+			t.Fatalf("throttled at request %d, inside the burst of %d", i+1, envelopeBurst)
+		}
+	}
+	w := httptest.NewRecorder()
+	if !s.throttleIngest(w, 7) {
+		t.Fatal("request past the burst was not throttled")
+	}
+	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") == "" {
+		t.Errorf("got %d Retry-After=%q, want 429 with Retry-After", w.Code, w.Header().Get("Retry-After"))
+	}
+	// Buckets are per project: one noisy app does not throttle another.
+	if s.throttleIngest(httptest.NewRecorder(), 8) {
+		t.Error("project 8 was throttled by project 7's traffic")
 	}
 }

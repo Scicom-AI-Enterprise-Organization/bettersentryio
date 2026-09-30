@@ -37,6 +37,9 @@ func (s *Server) handleIngestError(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "unknown ingest key")
 		return
 	}
+	if s.throttleIngest(w, projectID) {
+		return
+	}
 
 	var e events.Event
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEventBytes))
