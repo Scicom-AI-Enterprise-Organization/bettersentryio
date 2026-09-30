@@ -23,13 +23,6 @@
   </div>
 </header>
 
-{{if .Warn}}
-<div class="banner">
-  <b>Default credentials in use.</b> This instance accepts <code>admin</code> / <code>12345</code>.
-  Set <code>--admin-password-file</code> (or <code>BSIO_ADMIN_PASSWORD</code>) before anyone else can reach it.
-</div>
-{{end}}
-
 <main>
 {{template "content" .}}
 </main>

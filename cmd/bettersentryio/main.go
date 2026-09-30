@@ -56,7 +56,7 @@ func main() {
 		alertWebhook  = fs.String("alert-webhook", os.Getenv("BSIO_ALERT_WEBHOOK"), "webhook URL to register as the 'default' alert channel")
 		alertType     = fs.String("alert-type", envOr("BSIO_ALERT_TYPE", "webhook"), "type of --alert-webhook: webhook|slack|teams")
 		adminUser     = fs.String("admin-user", envOr("BSIO_ADMIN_USER", web.DefaultUser), "username for the web UI")
-		adminPass     = fs.String("admin-password", os.Getenv("BSIO_ADMIN_PASSWORD"), "password for the web UI (development default: "+web.DefaultPassword+")")
+		adminPass     = fs.String("admin-password", os.Getenv("BSIO_ADMIN_PASSWORD"), "password for the web UI (unset: UI sign-in is disabled)")
 		adminPassFile = fs.String("admin-password-file", os.Getenv("BSIO_ADMIN_PASSWORD_FILE"), "file containing the web UI password (preferred over --admin-password)")
 		apiToken      = fs.String("api-token", os.Getenv("BSIO_API_TOKEN"), "operator token for the admin API (create/delete apps, mute). Unset: any ingest key is accepted, which is development-only")
 		apiTokenFile  = fs.String("api-token-file", os.Getenv("BSIO_API_TOKEN_FILE"), "file containing the operator token (preferred over --api-token)")
@@ -179,10 +179,9 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 	if err != nil {
 		return err
 	}
-	if auth.UsingDefaults {
-		log.Warn("USING DEFAULT CREDENTIALS — the web UI accepts admin/12345. "+
-			"Set --admin-password-file or BSIO_ADMIN_PASSWORD before exposing this instance.",
-			"user", web.DefaultUser)
+	if auth.Disabled {
+		log.Warn("NO UI PASSWORD SET — web UI sign-in is disabled. " +
+			"Set --admin-password-file or BSIO_ADMIN_PASSWORD to enable it.")
 	}
 	if cfg.apiToken == "" {
 		log.Warn("NO API TOKEN SET — any valid ingest key may create and delete apps. " +

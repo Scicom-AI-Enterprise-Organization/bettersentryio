@@ -24,8 +24,8 @@
   <button type="submit">Sign in</button>
 
   {{if .Warn}}
-  <p class="hint">Development default: <code>admin</code> / <code>12345</code> — change it before
-  this instance is reachable by anyone else.</p>
+  <p class="hint">Sign-in is disabled: this engine has no password. Set
+  <code>--admin-password-file</code> (or <code>BSIO_ADMIN_PASSWORD</code>) and restart.</p>
   {{end}}
 </form>
 </body>

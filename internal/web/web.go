@@ -100,7 +100,7 @@ func (s *Server) render(w http.ResponseWriter, name string, p page) {
 		http.Error(w, "unknown page", http.StatusInternalServerError)
 		return
 	}
-	p.Warn = s.auth.UsingDefaults
+	p.Warn = s.auth.Disabled
 	p.Now = time.Now()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	entry := "layout"

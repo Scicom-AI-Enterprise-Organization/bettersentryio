@@ -46,3 +46,25 @@ func TestLocalPathRefusesOffSiteRedirects(t *testing.T) {
 		}
 	}
 }
+
+// There is no default password: an engine started without one refuses every
+// sign-in, including an empty password against the empty configured one.
+func TestNoPasswordMeansNoSignIn(t *testing.T) {
+	a, err := NewAuth("", "", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.Disabled {
+		t.Fatal("Disabled = false with no password configured")
+	}
+	for _, pass := range []string{"", "12345", "admin"} {
+		if a.Verify(DefaultUser, pass) {
+			t.Errorf("Verify(%q, %q) = true with no password configured", DefaultUser, pass)
+		}
+	}
+
+	b, _ := NewAuth("ops", "correct horse", time.Hour)
+	if b.Disabled || !b.Verify("ops", "correct horse") || b.Verify("ops", "") {
+		t.Error("a configured password must verify exactly")
+	}
+}
