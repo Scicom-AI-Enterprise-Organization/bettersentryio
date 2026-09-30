@@ -89,7 +89,7 @@ func New(db *store.DB, log *slog.Logger, buffer int) *Alerter {
 	return &Alerter{
 		db:      db,
 		log:     log,
-		http:    &http.Client{Timeout: 10 * time.Second},
+		http:    publicOnlyClient(),
 		queue:   make(chan Event, buffer),
 		backoff: time.Second,
 	}

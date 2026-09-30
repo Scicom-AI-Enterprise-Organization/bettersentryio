@@ -97,6 +97,8 @@ func TestTwoReplicasFlushOneDigestOnce(t *testing.T) {
 
 	one := New(dbA, quiet(), 4)
 	two := New(dbB, quiet(), 4)
+	one.AllowPrivateDestinations()
+	two.AllowPrivateDestinations()
 
 	// Both sweep at the same instant, which is the case a shared ticker produces.
 	var wg sync.WaitGroup
@@ -151,6 +153,7 @@ func TestFlushIsIdempotentOnAnEmptyWindow(t *testing.T) {
 
 	dbA, _, projectID, channelID := fixture(t, srv.URL)
 	a := New(dbA, quiet(), 4)
+	a.AllowPrivateDestinations()
 	ctx := context.Background()
 
 	a.flushDigests(ctx)

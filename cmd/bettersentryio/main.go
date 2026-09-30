@@ -56,6 +56,7 @@ func main() {
 		maxConns      = fs.Int("db-max-conns", 10, "Postgres connection pool size")
 		alertWebhook  = fs.String("alert-webhook", os.Getenv("BSIO_ALERT_WEBHOOK"), "webhook URL to register as the 'default' alert channel")
 		alertType     = fs.String("alert-type", envOr("BSIO_ALERT_TYPE", "webhook"), "type of --alert-webhook: webhook|slack|teams")
+		alertPrivate  = fs.Bool("alert-allow-private", os.Getenv("BSIO_ALERT_ALLOW_PRIVATE") == "1", "let alert webhooks reach private/loopback addresses, for an internal relay (env BSIO_ALERT_ALLOW_PRIVATE=1)")
 		adminUser     = fs.String("admin-user", envOr("BSIO_ADMIN_USER", web.DefaultUser), "username for the web UI")
 		adminPass     = fs.String("admin-password", os.Getenv("BSIO_ADMIN_PASSWORD"), "password for the web UI (unset: UI sign-in is disabled)")
 		adminPassFile = fs.String("admin-password-file", os.Getenv("BSIO_ADMIN_PASSWORD_FILE"), "file containing the web UI password (preferred over --admin-password)")
@@ -116,6 +117,7 @@ func main() {
 		maxConns:     int32(*maxConns),
 		alertWebhook: *alertWebhook,
 		alertType:    *alertType,
+		alertPrivate: *alertPrivate,
 		adminUser:    *adminUser,
 		adminPass:    password,
 		apiToken:     token,
@@ -136,6 +138,7 @@ type runConfig struct {
 	maxConns     int32
 	alertWebhook string
 	alertType    string
+	alertPrivate bool
 	adminUser    string
 	adminPass    string
 	apiToken     string
@@ -186,6 +189,10 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 
 	alerter := alert.New(db, log.With("component", "alerter"), 256)
 	alerter.SetBaseURL(cfg.baseURL)
+	if cfg.alertPrivate {
+		alerter.AllowPrivateDestinations()
+		log.Warn("alert webhooks may reach private and loopback addresses (--alert-allow-private)")
+	}
 	engine := monitor.NewEngine(db, alerter, log.With("component", "engine"), cfg.baseURL)
 	detector := monitor.NewDetector(db, alerter, log.With("component", "detector"), cfg.tickInterval, cfg.baseURL)
 

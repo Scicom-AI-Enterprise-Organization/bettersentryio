@@ -45,6 +45,7 @@ func TestDetectorLeaderElection(t *testing.T) {
 
 	a := env.alerter
 	b := alert.New(db2, log, 64)
+	b.AllowPrivateDestinations()
 
 	d1 := NewDetector(env.db, a, log, 50*time.Millisecond, "http://one")
 	d2 := NewDetector(db2, b, log, 50*time.Millisecond, "http://two")
