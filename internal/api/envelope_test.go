@@ -183,3 +183,25 @@ func TestThrottleIngestAnswers429WhenTheBucketIsEmpty(t *testing.T) {
 		t.Error("project 8 was throttled by project 7's traffic")
 	}
 }
+
+// VAPT SAST #40: a gzip bomb (a few KB on the wire, more than the 20 MB cap once
+// inflated) is refused instead of being inflated into memory.
+func TestReadEnvelopeBodyRefusesAGzipBomb(t *testing.T) {
+	var buf bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	zero := make([]byte, 1<<20)
+	for i := 0; i < (maxEnvelopeBytes>>20)+2; i++ {
+		_, _ = zw.Write(zero)
+	}
+	_ = zw.Close()
+	if buf.Len() > 1<<20 {
+		t.Fatalf("bomb is %d bytes compressed; the test wants a small wire size", buf.Len())
+	}
+
+	r := httptest.NewRequest(http.MethodPost, "/api/1/envelope/", &buf)
+	r.Header.Set("Content-Encoding", "gzip")
+	_, err := readEnvelopeBody(httptest.NewRecorder(), r)
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("err = %v, want envelope too large", err)
+	}
+}

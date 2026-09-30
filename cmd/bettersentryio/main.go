@@ -256,22 +256,7 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 		}
 	}()
 
-	// Every phase of a connection is bounded (VAPT SAST #40): without ReadTimeout a
-	// client could trickle a 20 MB envelope body forever, and without IdleTimeout a
-	// kept-alive connection never closed. 64 KiB of request line + headers also bounds
-	// how many ?tag= / field= / search terms one query can pile into its SQL.
-	httpSrv := &http.Server{
-		Addr:              cfg.listen,
-		Handler:           server.Handler(ui),
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       60 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       90 * time.Second,
-		MaxHeaderBytes:    64 << 10,
-		// Only used with --tls-cert-file. TLS 1.2 is the floor; Go's default suites
-		// for 1.2 are already AEAD-only.
-		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-	}
+	httpSrv := newHTTPServer(cfg.listen, server.Handler(ui))
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -318,6 +303,25 @@ func run(parent context.Context, log *slog.Logger, cfg runConfig) error {
 	wg.Wait()
 	log.Info("stopped cleanly")
 	return nil
+}
+
+// newHTTPServer bounds every phase of a connection (VAPT SAST #40): without
+// ReadTimeout a client could trickle a 20 MB envelope body forever, and without
+// IdleTimeout a kept-alive connection never closed. 64 KiB of request line + headers
+// also bounds how many ?tag= / field= / search terms one query can pile into its SQL.
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       90 * time.Second,
+		MaxHeaderBytes:    64 << 10,
+		// Only used with --tls-cert-file. TLS 1.2 is the floor; Go's default suites
+		// for 1.2 are already AEAD-only.
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+	}
 }
 
 // printFirstBootHelp prints a copy-pasteable beat command once, on the boot that
