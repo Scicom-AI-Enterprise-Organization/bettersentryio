@@ -224,7 +224,7 @@ func (s *Server) Handler(ui interface{ Routes(*http.ServeMux) }) http.Handler {
 	if ui != nil {
 		ui.Routes(mux)
 	}
-	return s.observe(mux)
+	return s.observe(securityHeaders(mux))
 }
 
 // observe is the outermost middleware: request counters for the metrics endpoint,
