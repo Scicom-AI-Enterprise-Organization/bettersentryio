@@ -9,7 +9,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { authConfig } from "@/lib/auth.config";
-import { samlProvider } from "@/lib/auth-saml";
+import { samlConfigured, samlProvider } from "@/lib/auth-saml";
 
 declare module "next-auth" {
   interface Session {
@@ -95,7 +95,7 @@ if (process.env.AUTH_KEYCLOAK_CLIENT_ID) {
   );
 }
 
-if (process.env.AUTH_SAML_ENTRY_POINT) {
+if (samlConfigured()) {
   providers.push(samlProvider());
 }
 

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { LoginForm } from "./login-form";
 import { HOME } from "@/lib/nav";
+import { samlConfigured } from "@/lib/auth-saml";
 
 export default async function LoginPage({
   searchParams,
@@ -16,7 +17,7 @@ export default async function LoginPage({
     azure: !!process.env.AUTH_AZURE_AD_CLIENT_ID,
     google: !!process.env.AUTH_GOOGLE_CLIENT_ID,
     keycloak: !!process.env.AUTH_KEYCLOAK_CLIENT_ID,
-    saml: !!process.env.AUTH_SAML_ENTRY_POINT,
+    saml: samlConfigured(),
   };
 
   return (
