@@ -53,9 +53,12 @@ ingest Ingress entirely and the engine needs no public route at all.
    ```
    `--platform linux/amd64` matters: this laptop is arm64 and the nodes are not.
 4. **App** — copy the manifests into `infra-dev`, commit, let ArgoCD sync.
-5. **Seed the admin user**, once, against the fresh database:
+5. **Seed the admin user**, once, against the fresh database. The web image is distroless
+   (no shell, no npm/npx, no Prisma CLI), so run Prisma from a checkout through a port-forward:
    ```bash
-   kubectl -n bettersentryio exec deploy/bettersentryio-web -- \
+   kubectl -n bettersentryio port-forward svc/bettersentryio-pg-rw 15432:5432 &
+   cd web && npm ci
+   DATABASE_URL='postgres://<user>:<password>@127.0.0.1:15432/<db>?schema=auth' \
      sh -c 'npx prisma db push --skip-generate && npx tsx prisma/seed.ts'
    ```
    Prisma is pinned to `?schema=auth` in `DATABASE_URL`. **Never point it at `public`** —

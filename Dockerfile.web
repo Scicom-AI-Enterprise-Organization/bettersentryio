@@ -6,7 +6,7 @@
 # server bundle — not node_modules, not the source. That is also why `next start` warns
 # locally: standalone expects `node server.js`, which is what the CMD below does.
 
-FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS deps
+FROM --platform=$BUILDPLATFORM node:22-trixie-slim AS deps
 WORKDIR /app
 # Prisma's postinstall needs the schema present, so copy it with the manifests rather than
 # after — otherwise `prisma generate` runs against nothing and the client is missing at build.
@@ -14,7 +14,7 @@ COPY web/package.json web/package-lock.json ./
 COPY web/prisma ./prisma
 RUN npm ci --no-audit --no-fund
 
-FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS build
+FROM --platform=$BUILDPLATFORM node:22-trixie-slim AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
@@ -31,33 +31,38 @@ RUN AUTH_SECRET=build-only-never-used-at-runtime \
     AUTH_URL=http://localhost:3000 \
     DATABASE_URL='postgres://placeholder:placeholder@localhost:5432/placeholder?schema=auth' \
     sh -c 'npx prisma generate && npm run build'
+# The runtime is distroless: no shell and no `openssl` binary, so Prisma's OpenSSL probe would
+# fail and fall back to "1.1.x" (the trap the old runtime solved by installing openssl). Pick
+# the engine for the target architecture here, where there is a shell, and point Prisma at
+# it with PRISMA_QUERY_ENGINE_LIBRARY so nothing has to be probed at runtime.
+ARG TARGETARCH
+RUN case "${TARGETARCH:-amd64}" in \
+      arm64) t=linux-arm64-openssl-3.0.x ;; \
+      *)     t=debian-openssl-3.0.x ;; \
+    esac \
+    && cp "node_modules/.prisma/client/libquery_engine-$t.so.node" /app/query-engine.so.node
 
-FROM node:22-bookworm-slim AS runtime
-# Prisma picks its query engine by probing for OpenSSL. node:*-slim ships neither the
-# openssl binary nor libssl, so the probe fails, falls back to "1.1.x", and then cannot
-# find an engine — even though the correct 3.0.x engine is sitting right there. Bookworm
-# *is* OpenSSL 3, so the fix is to let the probe succeed rather than to also ship an engine
-# built for an OpenSSL this image does not have.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Google distroless: no shell, no package manager, non-root UID 65532. Debian 13 carries
+# libssl.so.3 / libcrypto.so.3 (the OpenSSL 3 engine needs them) and the CA bundle.
+FROM gcr.io/distroless/nodejs22-debian13:nonroot AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    HOSTNAME=0.0.0.0
+    HOSTNAME=0.0.0.0 \
+    PRISMA_QUERY_ENGINE_LIBRARY=/app/query-engine.so.node
 # The standalone bundle, plus the two asset trees it does not trace.
-COPY --from=build /app/.next/standalone ./
-COPY --from=build /app/.next/static ./.next/static
+# Owned by the runtime user: Next.js writes its cache under .next/cache.
+COPY --from=build --chown=65532:65532 /app/.next/standalone ./
+COPY --from=build --chown=65532:65532 /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
-# Prisma migrations and the seed, so the admin user can be created by a one-off exec
-# against a fresh database. Kept out of the default CMD: a container start must never
-# mutate a schema on its own.
+# Prisma schema + migrations (for reference; the image cannot run the Prisma CLI: see
+# deploy/eks/README.md for the bootstrap). Client and the one engine this arch needs.
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=build /app/query-engine.so.node /app/query-engine.so.node
 
-# node:*-slim ships an unprivileged `node` user (uid 1000).
-USER node
 EXPOSE 3000
-CMD ["node", "server.js"]
+# The entrypoint is already node, so CMD is only the script.
+CMD ["server.js"]
